@@ -1,13 +1,5 @@
 {
-  "CLAUDE.md": {},
-  "README.md": {},
-  "SECURITY_GUIDELINES.md": {},
-  "SECURITY_SCANNING.md": {},
-  "docker-compose.yml": {},
-  "skill/courtlistener-citation-validator/SKILL.md": {
-    "1378e0e45c3affe6190635d127e437549fc75346f30d375ce1057ed22ae856b3": {
-      "line": 3,
-      "match": "fake citations"
-    }
-  }
+  "INSTALL.md": {},
+  "PROMPTS.md": {},
+  "USAGE_EXAMPLES.md": {}
 }

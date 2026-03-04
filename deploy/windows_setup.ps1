@@ -3,6 +3,10 @@
 
 #Requires -Version 5.1
 
+# Import validation helpers (format validation, secure input, retry loops)
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Import-Module "$ScriptDir\Validation-Helpers.psm1" -Force
+
 Write-Host ""
 Write-Host "=== CourtListener MCP - Windows Setup ===" -ForegroundColor Green
 Write-Host ""
@@ -302,34 +306,11 @@ if ($existingToken.Found) {
 
 # Collect and store token if needed
 if ($updateToken) {
-    Write-Host ""
-    Write-Host "Get a free API token at: https://www.courtlistener.com/sign-in/" -ForegroundColor Cyan
-    Write-Host "CourtListener tokens are 40-character hex strings." -ForegroundColor Gray
-    Write-Host ""
-
-    $secureToken = Read-Host "Enter your CourtListener API token" -AsSecureString
-    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
-    $token = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-
-    if ([string]::IsNullOrWhiteSpace($token)) {
-        Write-Host "[ERROR] No token provided. Exiting." -ForegroundColor Red
+    # Collect and validate token using module (3-attempt retry, hidden input, strict hex format)
+    $token = Read-CourtListenerTokenWithValidation
+    if (-not $token) {
+        Write-Host "[ERROR] No valid token provided. Exiting." -ForegroundColor Red
         exit 1
-    }
-
-    $token = $token.Trim()
-
-    # Validate token format
-    if ($token.Length -lt 30) {
-        Write-Host "[WARN] Token seems short ($($token.Length) chars). CourtListener tokens are typically 40 characters." -ForegroundColor Yellow
-        $confirm = Read-Host "Continue anyway? (y/n)"
-        if ($confirm -ne 'y') { exit 1 }
-    }
-
-    if ($token -notmatch '^[a-f0-9]+$') {
-        Write-Host "[WARN] Token contains non-hex characters. CourtListener tokens are hex strings (a-f, 0-9)." -ForegroundColor Yellow
-        $confirm = Read-Host "Continue anyway? (y/n)"
-        if ($confirm -ne 'y') { exit 1 }
     }
 
     # Store via Python first, PowerShell fallback
