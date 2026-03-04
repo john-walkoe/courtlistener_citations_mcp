@@ -50,10 +50,16 @@ $ProjectDir = Split-Path -Parent $ScriptDir
 function Get-SharedEntropy {
     if (Test-Path $SHARED_ENTROPY_PATH) {
         $bytes = [System.IO.File]::ReadAllBytes($SHARED_ENTROPY_PATH)
-        if ($bytes.Length -eq $SHARED_ENTROPY_BYTES) {
+        if ($bytes.Length -ge $SHARED_ENTROPY_BYTES) {
+            # File may be larger than 32 bytes (USPTO Python format) - use only first 32 bytes as entropy
+            if ($bytes.Length -gt $SHARED_ENTROPY_BYTES) {
+                $seed = New-Object byte[] $SHARED_ENTROPY_BYTES
+                [System.Array]::Copy($bytes, $seed, $SHARED_ENTROPY_BYTES)
+                return $seed
+            }
             return $bytes
         }
-        Write-Host "[WARN] Entropy file has unexpected size ($($bytes.Length) bytes) - recreating" -ForegroundColor Yellow
+        Write-Host "[WARN] Entropy file too small ($($bytes.Length) bytes, need $SHARED_ENTROPY_BYTES) - recreating" -ForegroundColor Yellow
     }
 
     # Create new entropy file
