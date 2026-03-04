@@ -43,14 +43,14 @@ $ProjectDir = Split-Path -Parent $ScriptDir
 # ============================================================================
 
 function Get-DpapiKeyFromFile {
-    param([string]$FilePath)
+    param([string]$FilePath, [switch]$Silent)
 
     if (-not (Test-Path $FilePath)) { return $null }
 
     try {
         $rawData = [System.IO.File]::ReadAllBytes($FilePath)
         if ($rawData.Length -le $DPAPI_ENTROPY_BYTES) {
-            Write-Host "[WARN] Key file appears corrupt (too small): $FilePath" -ForegroundColor Yellow
+            if (-not $Silent) { Write-Host "[WARN] Key file appears corrupt (too small): $FilePath" -ForegroundColor Yellow }
             return $null
         }
 
@@ -65,7 +65,7 @@ function Get-DpapiKeyFromFile {
         return [System.Text.Encoding]::UTF8.GetString($decrypted)
     }
     catch {
-        Write-Host "[WARN] Failed to decrypt key file ($FilePath): $_" -ForegroundColor Yellow
+        if (-not $Silent) { Write-Host "[WARN] Failed to decrypt key file ($FilePath): $_" -ForegroundColor Yellow }
         return $null
     }
 }
@@ -116,13 +116,15 @@ try:
 except Exception as e:
     print('ERROR:' + str(e))
 '@
+        Push-Location $ProjectDir
         $result = & $pythonExe -c $pythonCode 2>$null | Out-String
+        Pop-Location
         if ($result -match "^TOKEN:(.*)") {
             $token = $matches[1].Trim()
-            return if ($token) { $token } else { $null }
+            if ($token) { return $token } else { return $null }
         }
     }
-    catch { }
+    catch { Pop-Location }
     return $null
 }
 
@@ -149,7 +151,9 @@ try:
 except Exception as e:
     print('ERROR:' + str(e))
 '@
+        Push-Location $ProjectDir
         $result = & $pythonExe -c $pythonCode 2>$null | Out-String
+        Pop-Location
         Remove-Item Env:\_CL_MGR_TOKEN -ErrorAction SilentlyContinue
 
         if ($result -match "SUCCESS") {
@@ -226,7 +230,8 @@ function Show-KeyStatus {
     Write-Host ""
 
     # OpenAI key
-    $oaiKey = Get-DpapiKeyFromFile -FilePath $OPENAI_KEY_PATH
+    $oaiFileExists = Test-Path $OPENAI_KEY_PATH
+    $oaiKey = Get-DpapiKeyFromFile -FilePath $OPENAI_KEY_PATH -Silent
     if ($oaiKey) {
         $masked = Hide-ApiKey -ApiKey $oaiKey
         Write-Host "[OK] OpenAI API Key:      $masked" -ForegroundColor Green
@@ -236,13 +241,18 @@ function Show-KeyStatus {
         $masked = Hide-ApiKey -ApiKey $env:OPENAI_API_KEY
         Write-Host "[OK] OpenAI API Key:      $masked (env var only)" -ForegroundColor Yellow
     }
+    elseif ($oaiFileExists) {
+        Write-Host "[!!] OpenAI API Key:      File exists but cannot be decrypted (incompatible format)" -ForegroundColor Red
+        Write-Host "     Use option [2] to re-enter your key and overwrite the file" -ForegroundColor Yellow
+    }
     else {
         Write-Host "[--] OpenAI API Key:      Not set  (optional)" -ForegroundColor Yellow
     }
     Write-Host ""
 
     # Mistral key
-    $mistralKey = Get-DpapiKeyFromFile -FilePath $MISTRAL_KEY_PATH
+    $mistralFileExists = Test-Path $MISTRAL_KEY_PATH
+    $mistralKey = Get-DpapiKeyFromFile -FilePath $MISTRAL_KEY_PATH -Silent
     if ($mistralKey) {
         $masked = Hide-ApiKey -ApiKey $mistralKey
         Write-Host "[OK] Mistral API Key:     $masked" -ForegroundColor Green
@@ -251,6 +261,10 @@ function Show-KeyStatus {
     elseif ($env:MISTRAL_API_KEY) {
         $masked = Hide-ApiKey -ApiKey $env:MISTRAL_API_KEY
         Write-Host "[OK] Mistral API Key:     $masked (env var only)" -ForegroundColor Yellow
+    }
+    elseif ($mistralFileExists) {
+        Write-Host "[!!] Mistral API Key:     File exists but cannot be decrypted (incompatible format)" -ForegroundColor Red
+        Write-Host "     Use option [3] to re-enter your key and overwrite the file" -ForegroundColor Yellow
     }
     else {
         Write-Host "[--] Mistral API Key:     Not set  (optional)" -ForegroundColor Yellow
@@ -393,7 +407,9 @@ except Exception as e:
     print('ERROR:' + str(e))
 '@
 
+    Push-Location $ProjectDir
     $result = & $pythonExe -c $pythonCode 2>$null | Out-String
+    Pop-Location
     if ($result -match "SUCCESS") {
         Write-Host "[OK] Migration successful - token now in Credential Manager" -ForegroundColor Green
         Write-Host "     DPAPI file retained as backup: $CL_TOKEN_PATH" -ForegroundColor Gray
