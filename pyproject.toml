@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "courtlistener-mcp"
+version = "1.0.0"
+description = "CourtListener Citation Validation MCP Server - Stripped-down citation validation tools"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "John Walkoe"}
+]
+dependencies = [
+    "fastmcp>=3.0.0b2",
+    "httpx[http2]>=0.28.1",
+    "pydantic>=2.10.6",
+    "pydantic-settings>=2.7.1",
+    "python-dotenv>=1.0.1",
+    "uvicorn[standard]>=0.32.0",
+    "keyring>=25.5.0",
+    "eyecite>=2.7.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "respx>=0.21.1",
+]
+
+[project.scripts]
+courtlistener-mcp = "courtlistener_mcp.main:run_server"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
