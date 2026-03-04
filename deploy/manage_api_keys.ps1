@@ -30,17 +30,66 @@ Import-Module "$ScriptDir\Validation-Helpers.psm1" -Force
 # Storage Configuration
 # ============================================================================
 
-$CL_CREDENTIAL_TARGET = "CourtListener MCP:API_TOKEN"
-$CL_TOKEN_PATH        = Join-Path $env:USERPROFILE ".courtlistener_api_token"
-$OPENAI_KEY_PATH      = Join-Path $env:USERPROFILE ".openai_api_key"
-$MISTRAL_KEY_PATH     = Join-Path $env:USERPROFILE ".mistral_api_key"
-$DPAPI_ENTROPY_BYTES  = 32
+$CL_CREDENTIAL_TARGET  = "CourtListener MCP:API_TOKEN"
+$CL_TOKEN_PATH         = Join-Path $env:USERPROFILE ".courtlistener_api_token"
+$OPENAI_KEY_PATH       = Join-Path $env:USERPROFILE ".openai_api_key"
+$MISTRAL_KEY_PATH      = Join-Path $env:USERPROFILE ".mistral_api_key"
+$SHARED_ENTROPY_PATH   = Join-Path $env:USERPROFILE ".uspto_internal_auth_secret"
+$SHARED_ENTROPY_BYTES  = 32   # 256-bit entropy seed
 
 $ProjectDir = Split-Path -Parent $ScriptDir
 
 # ============================================================================
+# Shared Entropy Seed (used by all MCPs in the suite)
+# ============================================================================
+# ~/.uspto_internal_auth_secret is a raw 32-byte binary file.
+# It is the entropy seed for all DPAPI file-based key storage across the MCP suite.
+# "First MCP wins" pattern: whoever runs setup first generates it;
+# all subsequent MCPs reuse the same file.
+
+function Get-SharedEntropy {
+    if (Test-Path $SHARED_ENTROPY_PATH) {
+        $bytes = [System.IO.File]::ReadAllBytes($SHARED_ENTROPY_PATH)
+        if ($bytes.Length -eq $SHARED_ENTROPY_BYTES) {
+            return $bytes
+        }
+        Write-Host "[WARN] Entropy file has unexpected size ($($bytes.Length) bytes) - recreating" -ForegroundColor Yellow
+    }
+
+    # Create new entropy file
+    Write-Host "[INFO] Creating shared entropy seed: $SHARED_ENTROPY_PATH" -ForegroundColor Cyan
+    $entropy = New-Object byte[] $SHARED_ENTROPY_BYTES
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $rng.GetBytes($entropy)
+    $rng.Dispose()
+
+    [System.IO.File]::WriteAllBytes($SHARED_ENTROPY_PATH, $entropy)
+
+    # Restrict to current user only
+    try {
+        $acl = Get-Acl $SHARED_ENTROPY_PATH
+        $acl.SetAccessRuleProtection($true, $false)
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $identity, "FullControl",
+            [System.Security.AccessControl.AccessControlType]::Allow
+        )
+        $acl.SetAccessRule($rule)
+        Set-Acl $SHARED_ENTROPY_PATH $acl
+    }
+    catch {
+        Write-Host "[WARN] Could not set file permissions on entropy file: $_" -ForegroundColor Yellow
+    }
+
+    Write-Host "[OK] Shared entropy seed created: $SHARED_ENTROPY_PATH" -ForegroundColor Green
+    return $entropy
+}
+
+# ============================================================================
 # DPAPI File Storage (used for OpenAI and Mistral)
 # ============================================================================
+# File format: raw DPAPI-encrypted blob only.
+# Entropy is loaded from ~/.uspto_internal_auth_secret (not embedded in the file).
 
 function Get-DpapiKeyFromFile {
     param([string]$FilePath, [switch]$Silent)
@@ -48,14 +97,8 @@ function Get-DpapiKeyFromFile {
     if (-not (Test-Path $FilePath)) { return $null }
 
     try {
-        $rawData = [System.IO.File]::ReadAllBytes($FilePath)
-        if ($rawData.Length -le $DPAPI_ENTROPY_BYTES) {
-            if (-not $Silent) { Write-Host "[WARN] Key file appears corrupt (too small): $FilePath" -ForegroundColor Yellow }
-            return $null
-        }
-
-        $entropy  = $rawData[0..($DPAPI_ENTROPY_BYTES - 1)]
-        $encrypted = $rawData[$DPAPI_ENTROPY_BYTES..($rawData.Length - 1)]
+        $entropy   = Get-SharedEntropy
+        $encrypted = [System.IO.File]::ReadAllBytes($FilePath)
 
         $decrypted = [System.Security.Cryptography.ProtectedData]::Unprotect(
             $encrypted, $entropy,
@@ -74,19 +117,14 @@ function Set-DpapiKeyToFile {
     param([string]$FilePath, [string]$KeyValue)
 
     try {
-        $entropy   = New-Object byte[] $DPAPI_ENTROPY_BYTES
-        $rng       = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
-        $rng.GetBytes($entropy)
-        $rng.Dispose()
-
+        $entropy   = Get-SharedEntropy
         $keyBytes  = [System.Text.Encoding]::UTF8.GetBytes($KeyValue)
         $encrypted = [System.Security.Cryptography.ProtectedData]::Protect(
             $keyBytes, $entropy,
             [System.Security.Cryptography.DataProtectionScope]::CurrentUser
         )
 
-        $combined = $entropy + $encrypted
-        [System.IO.File]::WriteAllBytes($FilePath, $combined)
+        [System.IO.File]::WriteAllBytes($FilePath, $encrypted)
         return $true
     }
     catch {
@@ -202,6 +240,17 @@ function Show-KeyStatus {
     Write-Host ""
     Write-Host "Current Key Status" -ForegroundColor Cyan
     Write-Host "==================" -ForegroundColor Cyan
+    Write-Host ""
+
+    # Entropy seed status
+    if (Test-Path $SHARED_ENTROPY_PATH) {
+        $entropySize = (Get-Item $SHARED_ENTROPY_PATH).Length
+        Write-Host "[OK] Entropy seed:        $SHARED_ENTROPY_PATH ($entropySize bytes)" -ForegroundColor Green
+    }
+    else {
+        Write-Host "[--] Entropy seed:        Not found - will be created on first key operation" -ForegroundColor Yellow
+        Write-Host "     Path: $SHARED_ENTROPY_PATH" -ForegroundColor Gray
+    }
     Write-Host ""
 
     # CourtListener token
