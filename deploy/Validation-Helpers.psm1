@@ -44,7 +44,7 @@ function Test-CourtListenerToken {
     If specified, suppress output and return only boolean.
 
     .OUTPUTS
-    Boolean — $true if valid, $false if invalid.
+    Boolean - $true if valid, $false if invalid.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -110,7 +110,7 @@ function Test-OpenAiApiKey {
     If specified, suppress output and return only boolean.
 
     .OUTPUTS
-    Boolean — $true if valid or empty, $false if provided but invalid.
+    Boolean - $true if valid or empty, $false if provided but invalid.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -123,11 +123,11 @@ function Test-OpenAiApiKey {
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        if (-not $Silent) { Write-Host "[INFO] OpenAI/Ollama API key is optional — skipping validation" -ForegroundColor Cyan }
+        if (-not $Silent) { Write-Host "[INFO] OpenAI/Ollama API key is optional - skipping validation" -ForegroundColor Cyan }
         return $true
     }
 
-    # Accept Ollama local endpoint key values — Ollama ignores the key entirely
+    # Accept Ollama local endpoint key values - Ollama ignores the key entirely
     # Matches: "ollama", "ollama:modelname", "OLLAMA", etc.
     if ($ApiKey -match '^ollama(:[a-zA-Z0-9._/-]+)?$') {
         if (-not $Silent) {
@@ -185,7 +185,7 @@ function Test-MistralApiKey {
     If specified, suppress output and return only boolean.
 
     .OUTPUTS
-    Boolean — $true if valid or empty, $false if provided but invalid.
+    Boolean - $true if valid or empty, $false if provided but invalid.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -198,7 +198,7 @@ function Test-MistralApiKey {
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        if (-not $Silent) { Write-Host "[INFO] Mistral API key is optional — skipping validation" -ForegroundColor Cyan }
+        if (-not $Silent) { Write-Host "[INFO] Mistral API key is optional - skipping validation" -ForegroundColor Cyan }
         return $true
     }
 
@@ -247,7 +247,7 @@ function Test-PlaceholderPattern {
     If specified, suppress output and return only boolean.
 
     .OUTPUTS
-    Boolean — $true if placeholder detected (invalid), $false if clean.
+    Boolean - $true if placeholder detected (invalid), $false if clean.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -272,7 +272,7 @@ function Test-PlaceholderPattern {
                 Write-Host "[ERROR] Detected placeholder pattern in $KeyType key: '$pattern'" -ForegroundColor Red
                 Write-Host "        Please use your actual key, not a placeholder" -ForegroundColor Yellow
             }
-            return $true  # Placeholder found — caller should treat as invalid
+            return $true  # Placeholder found - caller should treat as invalid
         }
     }
 
@@ -302,7 +302,7 @@ function Test-PathSecurity {
     If specified, suppress output and return only boolean.
 
     .OUTPUTS
-    Boolean — $true if safe, $false if rejected.
+    Boolean - $true if safe, $false if rejected.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -320,7 +320,7 @@ function Test-PathSecurity {
     if ($Path -match '\.\.') {
         if (-not $Silent) {
             Write-Host "[ERROR] $PathName contains path traversal (..): $Path" -ForegroundColor Red
-            Write-Host "        Path traversal is a security risk — rejected" -ForegroundColor Red
+            Write-Host "        Path traversal is a security risk - rejected" -ForegroundColor Red
         }
         return $false
     }
@@ -365,7 +365,7 @@ function New-SecureSecret {
     Number of random bytes (default 32, yields a 44-char base64 string).
 
     .OUTPUTS
-    String — Base64-encoded secure random secret.
+    String - Base64-encoded secure random secret.
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -400,7 +400,7 @@ function Read-ApiKeySecure {
     The prompt text to display.
 
     .OUTPUTS
-    String — The entered key in plaintext.
+    String - The entered key in plaintext.
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -429,7 +429,7 @@ function Read-CourtListenerTokenWithValidation {
     Maximum number of attempts before giving up (default 3).
 
     .OUTPUTS
-    String — Valid token, or $null if all attempts failed.
+    String - Valid token, or $null if all attempts failed.
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -457,7 +457,7 @@ function Read-CourtListenerTokenWithValidation {
         }
         else {
             if ($attempt -lt $MaxAttempts) {
-                Write-Host "[WARN] Attempt $attempt of $MaxAttempts — please try again" -ForegroundColor Yellow
+                Write-Host "[WARN] Attempt $attempt of $MaxAttempts - please try again" -ForegroundColor Yellow
                 Write-Host "[INFO] Format: 40 lowercase hex characters (a-f, 0-9)" -ForegroundColor Cyan
             }
         }
@@ -473,13 +473,13 @@ function Read-OpenAiApiKeyWithValidation {
     Prompts for an OpenAI API key with validation retry loop (optional key).
 
     .DESCRIPTION
-    Press Enter to skip — OpenAI is optional for this MCP.
+    Press Enter to skip - OpenAI is optional for this MCP.
 
     .PARAMETER MaxAttempts
     Maximum number of attempts before giving up (default 3).
 
     .OUTPUTS
-    String — Valid key, empty string if skipped, or $null if all attempts failed.
+    String - Valid key, empty string if skipped, or $null if all attempts failed.
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -510,7 +510,7 @@ function Read-OpenAiApiKeyWithValidation {
         }
         else {
             if ($attempt -lt $MaxAttempts) {
-                Write-Host "[WARN] Attempt $attempt of $MaxAttempts — please try again" -ForegroundColor Yellow
+                Write-Host "[WARN] Attempt $attempt of $MaxAttempts - please try again" -ForegroundColor Yellow
                 Write-Host "[INFO] Format: starts with 'sk-' (OpenAI) or enter 'ollama' for local Ollama endpoint" -ForegroundColor Cyan
             }
         }
@@ -526,13 +526,13 @@ function Read-MistralApiKeyWithValidation {
     Prompts for a Mistral API key with validation retry loop (optional key).
 
     .DESCRIPTION
-    Press Enter to skip — Mistral is optional for this MCP.
+    Press Enter to skip - Mistral is optional for this MCP.
 
     .PARAMETER MaxAttempts
     Maximum number of attempts before giving up (default 3).
 
     .OUTPUTS
-    String — Valid key, empty string if skipped, or $null if all attempts failed.
+    String - Valid key, empty string if skipped, or $null if all attempts failed.
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -563,7 +563,7 @@ function Read-MistralApiKeyWithValidation {
         }
         else {
             if ($attempt -lt $MaxAttempts) {
-                Write-Host "[WARN] Attempt $attempt of $MaxAttempts — please try again" -ForegroundColor Yellow
+                Write-Host "[WARN] Attempt $attempt of $MaxAttempts - please try again" -ForegroundColor Yellow
                 Write-Host "[INFO] Format: 32 alphanumeric characters (a-z, A-Z, 0-9)" -ForegroundColor Cyan
             }
         }
@@ -586,7 +586,7 @@ function Show-ApiKeyRequirements {
     param()
 
     Write-Host ""
-    Write-Host "API Key Requirements — CourtListener Citation Validation MCP" -ForegroundColor Cyan
+    Write-Host "API Key Requirements - CourtListener Citation Validation MCP" -ForegroundColor Cyan
     Write-Host "==============================================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "CourtListener API Token:" -ForegroundColor White
@@ -625,7 +625,7 @@ function Hide-ApiKey {
     Number of characters to show at the end (default 5).
 
     .OUTPUTS
-    String — Masked key, e.g. "***...abcde".
+    String - Masked key, e.g. "***...abcde".
     #>
     [CmdletBinding()]
     [OutputType([string])]

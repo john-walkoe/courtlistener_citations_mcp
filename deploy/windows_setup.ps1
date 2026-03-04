@@ -169,7 +169,7 @@ try {
 Write-Host ""
 Write-Host "API Token Configuration" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "[INFO] Token storage priority: Windows Credential Manager → File-based DPAPI" -ForegroundColor Yellow
+Write-Host "[INFO] Token storage priority: Windows Credential Manager -> File-based DPAPI" -ForegroundColor Yellow
 Write-Host ""
 
 # Load DPAPI assembly (for fallback PowerShell storage)

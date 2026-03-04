@@ -10,7 +10,7 @@
       - Mistral API key          (optional, 32-char alphanumeric)
 
     Storage:
-      - CourtListener: Windows Credential Manager (primary) → DPAPI file fallback (~/.courtlistener_api_token)
+      - CourtListener: Windows Credential Manager (primary) -> DPAPI file fallback (~/.courtlistener_api_token)
       - OpenAI:        DPAPI encrypted file (~/.openai_api_key)
       - Mistral:       DPAPI encrypted file (~/.mistral_api_key)
 
@@ -96,7 +96,7 @@ function Set-DpapiKeyToFile {
 }
 
 # ============================================================================
-# CourtListener Token — Python-backed secure storage
+# CourtListener Token - Python-backed secure storage
 # ============================================================================
 
 function Get-CourtListenerToken {
@@ -191,7 +191,7 @@ function Remove-CourtListenerToken {
 }
 
 # ============================================================================
-# Status Check — all three keys
+# Status Check - all three keys
 # ============================================================================
 
 function Show-KeyStatus {
@@ -259,7 +259,7 @@ function Show-KeyStatus {
 }
 
 # ============================================================================
-# Live API Test — CourtListener only (others are validated by format only)
+# Live API Test - CourtListener only (others are validated by format only)
 # ============================================================================
 
 function Test-CourtListenerConnection {
@@ -287,7 +287,7 @@ function Test-CourtListenerConnection {
     catch {
         $statusCode = $_.Exception.Response.StatusCode.Value__
         if ($statusCode -eq 401) {
-            Write-Host "[ERROR] API returned 401 Unauthorized — token may be invalid or expired" -ForegroundColor Red
+            Write-Host "[ERROR] API returned 401 Unauthorized - token may be invalid or expired" -ForegroundColor Red
         }
         elseif ($statusCode) {
             Write-Host "[ERROR] API returned HTTP $statusCode" -ForegroundColor Red
@@ -309,7 +309,7 @@ function Test-OpenAiKeyFormat {
         Write-Host "[OK] OpenAI API key format valid" -ForegroundColor Green
     }
     else {
-        Write-Host "[!!] OpenAI API key format INVALID — please update it" -ForegroundColor Red
+        Write-Host "[!!] OpenAI API key format INVALID - please update it" -ForegroundColor Red
     }
 }
 
@@ -324,7 +324,7 @@ function Test-MistralKeyFormat {
         Write-Host "[OK] Mistral API key format valid (32 chars, alphanumeric)" -ForegroundColor Green
     }
     else {
-        Write-Host "[!!] Mistral API key format INVALID — please update it" -ForegroundColor Red
+        Write-Host "[!!] Mistral API key format INVALID - please update it" -ForegroundColor Red
     }
 }
 
@@ -345,7 +345,7 @@ function Remove-OptionalKey {
 }
 
 # ============================================================================
-# Migrate CourtListener token from DPAPI file → Credential Manager
+# Migrate CourtListener token from DPAPI file -> Credential Manager
 # ============================================================================
 
 function Invoke-MigrateCourtListenerToken {
@@ -355,12 +355,12 @@ function Invoke-MigrateCourtListenerToken {
     # Already in Credential Manager?
     $existing = Get-CourtListenerToken
     if ($existing) {
-        Write-Host "[OK] Token already present in Credential Manager — nothing to migrate" -ForegroundColor Green
+        Write-Host "[OK] Token already present in Credential Manager - nothing to migrate" -ForegroundColor Green
         return
     }
 
     if (-not (Test-Path $CL_TOKEN_PATH)) {
-        Write-Host "[INFO] No DPAPI file found at $CL_TOKEN_PATH — nothing to migrate" -ForegroundColor Yellow
+        Write-Host "[INFO] No DPAPI file found at $CL_TOKEN_PATH - nothing to migrate" -ForegroundColor Yellow
         return
     }
 
@@ -381,7 +381,7 @@ try:
     success = migrate_to_credential_manager()
     print('SUCCESS' if success else 'SKIPPED')
 except AttributeError:
-    # Function may not exist in older versions — call store_api_token with file content
+    # Function may not exist in older versions - call store_api_token with file content
     from courtlistener_mcp.shared.secure_storage import get_api_token, store_api_token
     token = get_api_token()
     if token:
@@ -395,14 +395,14 @@ except Exception as e:
 
     $result = & $pythonExe -c $pythonCode 2>$null | Out-String
     if ($result -match "SUCCESS") {
-        Write-Host "[OK] Migration successful — token now in Credential Manager" -ForegroundColor Green
+        Write-Host "[OK] Migration successful - token now in Credential Manager" -ForegroundColor Green
         Write-Host "     DPAPI file retained as backup: $CL_TOKEN_PATH" -ForegroundColor Gray
     }
     elseif ($result -match "SKIPPED") {
         Write-Host "[OK] Token already in Credential Manager" -ForegroundColor Green
     }
     elseif ($result -match "NO_TOKEN") {
-        Write-Host "[ERROR] Could not read token from DPAPI file — file may be corrupted" -ForegroundColor Red
+        Write-Host "[ERROR] Could not read token from DPAPI file - file may be corrupted" -ForegroundColor Red
     }
     else {
         Write-Host "[ERROR] Migration failed: $result" -ForegroundColor Red
@@ -416,7 +416,7 @@ except Exception as e:
 function Main {
     while ($true) {
         Clear-Host
-        Write-Host "CourtListener Citation MCP — API Key Management" -ForegroundColor Cyan
+        Write-Host "CourtListener Citation MCP - API Key Management" -ForegroundColor Cyan
         Write-Host "================================================" -ForegroundColor Cyan
 
         Show-KeyStatus
@@ -427,7 +427,7 @@ function Main {
         Write-Host "  [3] Update Mistral API key"
         Write-Host "  [4] Test all keys"
         Write-Host "  [5] Remove key(s)"
-        Write-Host "  [6] Migrate CourtListener token (DPAPI file → Credential Manager)"
+        Write-Host "  [6] Migrate CourtListener token (DPAPI file -> Credential Manager)"
         Write-Host "  [7] Show key format requirements"
         Write-Host "  [8] Exit"
         Write-Host ""
@@ -450,7 +450,7 @@ function Main {
                     Set-CourtListenerToken -Token $newToken | Out-Null
                 }
                 else {
-                    Write-Host "[INFO] Operation cancelled — no valid token provided" -ForegroundColor Yellow
+                    Write-Host "[INFO] Operation cancelled - no valid token provided" -ForegroundColor Yellow
                 }
 
                 Write-Host ""
@@ -474,7 +474,7 @@ function Main {
                     Write-Host "[ERROR] Validation failed after maximum attempts" -ForegroundColor Red
                 }
                 else {
-                    Write-Host "[INFO] Operation cancelled — no key provided" -ForegroundColor Yellow
+                    Write-Host "[INFO] Operation cancelled - no key provided" -ForegroundColor Yellow
                 }
 
                 Write-Host ""
@@ -498,7 +498,7 @@ function Main {
                     Write-Host "[ERROR] Validation failed after maximum attempts" -ForegroundColor Red
                 }
                 else {
-                    Write-Host "[INFO] Operation cancelled — no key provided" -ForegroundColor Yellow
+                    Write-Host "[INFO] Operation cancelled - no key provided" -ForegroundColor Yellow
                 }
 
                 Write-Host ""
