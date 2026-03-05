@@ -1,24 +1,28 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Interactive API key management for CourtListener Citation Validation MCP.
+    Unified API key management for the MCP suite (CourtListener + shared keys).
 
 .DESCRIPTION
-    Manage all API keys used by this MCP:
-      - CourtListener API token  (required, 40-char hex)
-      - OpenAI API key           (optional, sk-... format)
-      - Mistral API key          (optional, 32-char alphanumeric)
+    Manage all API keys used by CourtListener MCP and shared across the suite:
+      - CourtListener API token     (required, 40-char hex)
+      - Pinecone API key            (optional, for future Pinecone endpoint use)
+      - Real OpenAI API key         (optional, shared with Pinecone MCPs)
+      - Chat API key                (optional, any provider)
+      - Embedding API key           (optional, real OpenAI)
+      - Cohere API key              (optional, reranking)
+      - Mistral OCR API key         (optional, stored in ~/.pinecone_mistral_api_key)
 
     Storage:
-      - CourtListener: Windows Credential Manager (primary) -> DPAPI file fallback (~/.courtlistener_api_token)
-      - OpenAI:        DPAPI encrypted file (~/.openai_api_key)
-      - Mistral:       DPAPI encrypted file (~/.mistral_api_key)
+      - CourtListener: Windows Credential Manager (primary) -> DPAPI file fallback
+      - All others:    DPAPI encrypted file, shared entropy from ~/.uspto_internal_auth_secret
+
+    Note: ~/.mistral_api_key belongs to USPTO MCPs. This script uses
+          ~/.pinecone_mistral_api_key to avoid collision.
 
 .EXAMPLE
     .\manage_api_keys.ps1
 #>
-
-#Requires -Version 5.1
 
 Add-Type -AssemblyName System.Security
 
@@ -30,12 +34,16 @@ Import-Module "$ScriptDir\Validation-Helpers.psm1" -Force
 # Storage Configuration
 # ============================================================================
 
-$CL_CREDENTIAL_TARGET  = "CourtListener MCP:API_TOKEN"
-$CL_TOKEN_PATH         = Join-Path $env:USERPROFILE ".courtlistener_api_token"
-$OPENAI_KEY_PATH       = Join-Path $env:USERPROFILE ".openai_api_key"
-$MISTRAL_KEY_PATH      = Join-Path $env:USERPROFILE ".mistral_api_key"
-$SHARED_ENTROPY_PATH   = Join-Path $env:USERPROFILE ".uspto_internal_auth_secret"
-$SHARED_ENTROPY_BYTES  = 32   # 256-bit entropy seed
+$CL_CREDENTIAL_TARGET       = "CourtListener MCP:API_TOKEN"
+$CL_TOKEN_PATH              = Join-Path $env:USERPROFILE ".courtlistener_api_token"
+$PINECONE_KEY_PATH          = Join-Path $env:USERPROFILE ".pinecone_api_key"
+$OPENAI_KEY_PATH            = Join-Path $env:USERPROFILE ".openai_api_key"             # real OpenAI only (sk-proj-)
+$OPENAI_COMPATIBLE_KEY_PATH = Join-Path $env:USERPROFILE ".openai_compatible_api_key"  # chat key, any provider
+$EMBEDDING_KEY_PATH         = Join-Path $env:USERPROFILE ".embedding_api_key"          # embedding endpoint key
+$COHERE_KEY_PATH            = Join-Path $env:USERPROFILE ".cohere_api_key"
+$PINECONE_MISTRAL_KEY_PATH  = Join-Path $env:USERPROFILE ".pinecone_mistral_api_key"   # NOT ~/.mistral_api_key (USPTO)
+$SHARED_ENTROPY_PATH        = Join-Path $env:USERPROFILE ".uspto_internal_auth_secret"
+$SHARED_ENTROPY_BYTES       = 32   # 256-bit entropy seed
 
 $ProjectDir = Split-Path -Parent $ScriptDir
 
@@ -92,7 +100,7 @@ function Get-SharedEntropy {
 }
 
 # ============================================================================
-# DPAPI File Storage (used for OpenAI and Mistral)
+# DPAPI File Storage
 # ============================================================================
 # File format: raw DPAPI-encrypted blob only.
 # Entropy is loaded from ~/.uspto_internal_auth_secret (not embedded in the file).
@@ -136,6 +144,50 @@ function Set-DpapiKeyToFile {
     catch {
         Write-Host "[ERROR] Failed to encrypt/write key file ($FilePath): $_" -ForegroundColor Red
         return $false
+    }
+}
+
+# ============================================================================
+# Generic DPAPI Key Updater
+# ============================================================================
+
+function Update-DpapiKey {
+    <#
+    .SYNOPSIS
+    Prompt for a key value, validate it, and write to a DPAPI key file.
+    Supports up to 3 attempts. ValidatorName is the name of a Test-* function
+    exported from Validation-Helpers.psm1.
+    #>
+    param(
+        [string]$Label,
+        [string]$FilePath,
+        [string]$ValidatorName,
+        [string]$Hint
+    )
+
+    Write-Host ""
+    Write-Host "  $Label" -ForegroundColor Cyan
+    if ($Hint) { Write-Host "  Format: $Hint" -ForegroundColor Gray }
+
+    $maxAttempts = 3; $attempt = 0
+    while ($attempt -lt $maxAttempts) {
+        $attempt++
+        $key = Read-ApiKeySecure -Prompt "  New key (leave blank to cancel)"
+        if ([string]::IsNullOrWhiteSpace($key)) { Write-Host "[INFO] Cancelled" -ForegroundColor Yellow; return }
+
+        $key = $key.Trim()
+        $valid = $true
+        if ($ValidatorName -and (Get-Command $ValidatorName -ErrorAction SilentlyContinue)) {
+            $valid = & $ValidatorName -ApiKey $key
+        }
+        if ($valid) {
+            if (Set-DpapiKeyToFile -FilePath $FilePath -KeyValue $key) {
+                Write-Host "[OK] $Label stored" -ForegroundColor Green
+                Write-Host "     File: $FilePath (DPAPI encrypted)" -ForegroundColor Gray
+            }
+            return
+        }
+        Write-Host "[ERROR] Invalid format (attempt $attempt/$maxAttempts)" -ForegroundColor Red
     }
 }
 
@@ -239,8 +291,31 @@ function Remove-CourtListenerToken {
 }
 
 # ============================================================================
-# Status Check - all three keys
+# Status Check - all keys
 # ============================================================================
+
+function Show-DpapiKeyStatus {
+    param([string]$Label, [string]$FilePath, [switch]$Optional)
+
+    $fileExists = Test-Path $FilePath
+    $value = Get-DpapiKeyFromFile -FilePath $FilePath -Silent
+
+    if ($value) {
+        $masked = Hide-ApiKey -ApiKey $value
+        Write-Host "[OK] $Label`: $masked" -ForegroundColor Green
+        Write-Host "     File: $FilePath" -ForegroundColor Gray
+    }
+    elseif ($fileExists) {
+        Write-Host "[!!] $Label`: File exists but cannot be decrypted" -ForegroundColor Red
+        Write-Host "     Re-enter the key to overwrite the file" -ForegroundColor Yellow
+    }
+    elseif ($Optional) {
+        Write-Host "[--] $Label`: Not set  (optional)" -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "[!!] $Label`: Not set  [REQUIRED]" -ForegroundColor Red
+    }
+}
 
 function Show-KeyStatus {
     Write-Host ""
@@ -248,7 +323,7 @@ function Show-KeyStatus {
     Write-Host "==================" -ForegroundColor Cyan
     Write-Host ""
 
-    # Entropy seed status
+    # Entropy seed
     if (Test-Path $SHARED_ENTROPY_PATH) {
         $entropySize = (Get-Item $SHARED_ENTROPY_PATH).Length
         Write-Host "[OK] Entropy seed:        $SHARED_ENTROPY_PATH ($entropySize bytes)" -ForegroundColor Green
@@ -271,64 +346,39 @@ function Show-KeyStatus {
     elseif ($clEnv) {
         $masked = Hide-ApiKey -ApiKey $clEnv
         Write-Host "[OK] CourtListener Token: $masked (env var only)" -ForegroundColor Yellow
-        Write-Host "     Storage: COURTLISTENER_API_TOKEN environment variable" -ForegroundColor Gray
     }
     else {
         Write-Host "[!!] CourtListener Token: Not set  [REQUIRED]" -ForegroundColor Red
     }
-
-    # Also show storage file status for CL
     if (Test-Path $CL_TOKEN_PATH) {
-        $fileSize = (Get-Item $CL_TOKEN_PATH).Length
-        Write-Host "     DPAPI file: $CL_TOKEN_PATH ($fileSize bytes)" -ForegroundColor Gray
+        $sz = (Get-Item $CL_TOKEN_PATH).Length
+        Write-Host "     DPAPI file: $CL_TOKEN_PATH ($sz bytes)" -ForegroundColor Gray
     }
     Write-Host ""
 
-    # OpenAI key
-    $oaiFileExists = Test-Path $OPENAI_KEY_PATH
-    $oaiKey = Get-DpapiKeyFromFile -FilePath $OPENAI_KEY_PATH -Silent
-    if ($oaiKey) {
-        $masked = Hide-ApiKey -ApiKey $oaiKey
-        Write-Host "[OK] OpenAI API Key:      $masked" -ForegroundColor Green
-        Write-Host "     Storage: $OPENAI_KEY_PATH (DPAPI)" -ForegroundColor Gray
-    }
-    elseif ($env:OPENAI_API_KEY) {
-        $masked = Hide-ApiKey -ApiKey $env:OPENAI_API_KEY
-        Write-Host "[OK] OpenAI API Key:      $masked (env var only)" -ForegroundColor Yellow
-    }
-    elseif ($oaiFileExists) {
-        Write-Host "[!!] OpenAI API Key:      File exists but cannot be decrypted (incompatible format)" -ForegroundColor Red
-        Write-Host "     Use option [2] to re-enter your key and overwrite the file" -ForegroundColor Yellow
-    }
-    else {
-        Write-Host "[--] OpenAI API Key:      Not set  (optional)" -ForegroundColor Yellow
-    }
+    # Shared keys
+    Show-DpapiKeyStatus -Label "Real OpenAI key     (~/.openai_api_key)" `
+                        -FilePath $OPENAI_KEY_PATH -Optional
     Write-Host ""
-
-    # Mistral key
-    $mistralFileExists = Test-Path $MISTRAL_KEY_PATH
-    $mistralKey = Get-DpapiKeyFromFile -FilePath $MISTRAL_KEY_PATH -Silent
-    if ($mistralKey) {
-        $masked = Hide-ApiKey -ApiKey $mistralKey
-        Write-Host "[OK] Mistral API Key:     $masked" -ForegroundColor Green
-        Write-Host "     Storage: $MISTRAL_KEY_PATH (DPAPI)" -ForegroundColor Gray
-    }
-    elseif ($env:MISTRAL_API_KEY) {
-        $masked = Hide-ApiKey -ApiKey $env:MISTRAL_API_KEY
-        Write-Host "[OK] Mistral API Key:     $masked (env var only)" -ForegroundColor Yellow
-    }
-    elseif ($mistralFileExists) {
-        Write-Host "[!!] Mistral API Key:     File exists but cannot be decrypted (incompatible format)" -ForegroundColor Red
-        Write-Host "     Use option [3] to re-enter your key and overwrite the file" -ForegroundColor Yellow
-    }
-    else {
-        Write-Host "[--] Mistral API Key:     Not set  (optional)" -ForegroundColor Yellow
-    }
+    Show-DpapiKeyStatus -Label "Chat API key        (~/.openai_compatible_api_key)" `
+                        -FilePath $OPENAI_COMPATIBLE_KEY_PATH -Optional
+    Write-Host ""
+    Show-DpapiKeyStatus -Label "Embedding key       (~/.embedding_api_key)" `
+                        -FilePath $EMBEDDING_KEY_PATH -Optional
+    Write-Host ""
+    Show-DpapiKeyStatus -Label "Pinecone key        (~/.pinecone_api_key)" `
+                        -FilePath $PINECONE_KEY_PATH -Optional
+    Write-Host ""
+    Show-DpapiKeyStatus -Label "Cohere key          (~/.cohere_api_key)" `
+                        -FilePath $COHERE_KEY_PATH -Optional
+    Write-Host ""
+    Show-DpapiKeyStatus -Label "Mistral OCR key     (~/.pinecone_mistral_api_key)" `
+                        -FilePath $PINECONE_MISTRAL_KEY_PATH -Optional
     Write-Host ""
 }
 
 # ============================================================================
-# Live API Test - CourtListener only (others are validated by format only)
+# Live API Test - CourtListener connection
 # ============================================================================
 
 function Test-CourtListenerConnection {
@@ -367,41 +417,11 @@ function Test-CourtListenerConnection {
     }
 }
 
-function Test-OpenAiKeyFormat {
-    $key = Get-DpapiKeyFromFile -FilePath $OPENAI_KEY_PATH
-    if (-not $key) { $key = $env:OPENAI_API_KEY }
-    if (-not $key) {
-        Write-Host "[--] OpenAI API Key: Not configured (optional)" -ForegroundColor Yellow
-        return
-    }
-    if (Test-OpenAiApiKey -ApiKey $key -Silent) {
-        Write-Host "[OK] OpenAI API key format valid" -ForegroundColor Green
-    }
-    else {
-        Write-Host "[!!] OpenAI API key format INVALID - please update it" -ForegroundColor Red
-    }
-}
-
-function Test-MistralKeyFormat {
-    $key = Get-DpapiKeyFromFile -FilePath $MISTRAL_KEY_PATH
-    if (-not $key) { $key = $env:MISTRAL_API_KEY }
-    if (-not $key) {
-        Write-Host "[--] Mistral API Key: Not configured (optional)" -ForegroundColor Yellow
-        return
-    }
-    if (Test-MistralApiKey -ApiKey $key -Silent) {
-        Write-Host "[OK] Mistral API key format valid (32 chars, alphanumeric)" -ForegroundColor Green
-    }
-    else {
-        Write-Host "[!!] Mistral API key format INVALID - please update it" -ForegroundColor Red
-    }
-}
-
 # ============================================================================
 # Delete helpers
 # ============================================================================
 
-function Remove-OptionalKey {
+function Remove-DpapiKey {
     param([string]$FilePath, [string]$KeyName)
 
     if (Test-Path $FilePath) {
@@ -433,14 +453,12 @@ function Invoke-MigrateCourtListenerToken {
         return
     }
 
-    # Read and decrypt the DPAPI file using the courtlistener_mcp module
     $pythonExe = Join-Path $ProjectDir ".venv\Scripts\python.exe"
     if (-not (Test-Path $pythonExe)) {
         Write-Host "[ERROR] Virtual environment not found. Run windows_setup.ps1 first." -ForegroundColor Red
         return
     }
 
-    # store_api_token reads the file automatically during migration
     $pythonCode = @'
 import sys
 from pathlib import Path
@@ -450,7 +468,6 @@ try:
     success = migrate_to_credential_manager()
     print('SUCCESS' if success else 'SKIPPED')
 except AttributeError:
-    # Function may not exist in older versions - call store_api_token with file content
     from courtlistener_mcp.shared.secure_storage import get_api_token, store_api_token
     token = get_api_token()
     if token:
@@ -493,19 +510,30 @@ function Main {
         Show-KeyStatus
 
         Write-Host "Actions:" -ForegroundColor White
-        Write-Host "  [1] Update CourtListener API token"
-        Write-Host "  [2] Update OpenAI API key"
-        Write-Host "  [3] Update Mistral API key"
-        Write-Host "  [4] Test all keys"
-        Write-Host "  [5] Remove key(s)"
-        Write-Host "  [6] Migrate CourtListener token (DPAPI file -> Credential Manager)"
-        Write-Host "  [7] Show key format requirements"
-        Write-Host "  [8] Exit"
+        Write-Host "  CourtListener:" -ForegroundColor Gray
+        Write-Host "    [1] Update CourtListener API token"
+        Write-Host "    [2] Test CourtListener connection"
+        Write-Host ""
+        Write-Host "  Shared OpenAI keys:" -ForegroundColor Gray
+        Write-Host "    [3] Update real OpenAI key       (~/.openai_api_key, shared with Pinecone)"
+        Write-Host "    [4] Update chat API key          (~/.openai_compatible_api_key, any provider)"
+        Write-Host "    [5] Update embedding API key     (~/.embedding_api_key)"
+        Write-Host ""
+        Write-Host "  Optional keys:" -ForegroundColor Gray
+        Write-Host "    [6] Update Pinecone key          (~/.pinecone_api_key)"
+        Write-Host "    [7] Update Cohere key            (~/.cohere_api_key)"
+        Write-Host "    [8] Update Mistral OCR key       (~/.pinecone_mistral_api_key)"
+        Write-Host ""
+        Write-Host "  Management:" -ForegroundColor Gray
+        Write-Host "    [9] Remove key(s)"
+        Write-Host "    [M] Migrate CourtListener token (DPAPI file -> Credential Manager)"
+        Write-Host "    [R] Show key format requirements"
+        Write-Host "    [0] Exit"
         Write-Host ""
 
-        $choice = Read-Host "Enter choice (1-8)"
+        $choice = Read-Host "Enter choice"
 
-        switch ($choice) {
+        switch ($choice.ToUpper()) {
 
             "1" {
                 Write-Host ""
@@ -529,98 +557,114 @@ function Main {
             }
 
             "2" {
-                Write-Host ""
-                Write-Host "Update OpenAI API Key" -ForegroundColor Cyan
-                Write-Host "=====================" -ForegroundColor Cyan
-                Write-Host ""
-
-                $newKey = Read-OpenAiApiKeyWithValidation
-
-                if ($newKey -and $newKey -ne "") {
-                    if (Set-DpapiKeyToFile -FilePath $OPENAI_KEY_PATH -KeyValue $newKey) {
-                        Write-Host "[OK] OpenAI API key stored: $OPENAI_KEY_PATH (DPAPI encrypted)" -ForegroundColor Green
-                    }
-                }
-                elseif ($null -eq $newKey) {
-                    Write-Host "[ERROR] Validation failed after maximum attempts" -ForegroundColor Red
-                }
-                else {
-                    Write-Host "[INFO] Operation cancelled - no key provided" -ForegroundColor Yellow
-                }
-
+                Test-CourtListenerConnection
                 Write-Host ""
                 Read-Host "Press Enter to continue"
             }
 
             "3" {
-                Write-Host ""
-                Write-Host "Update Mistral API Key" -ForegroundColor Cyan
-                Write-Host "======================" -ForegroundColor Cyan
-                Write-Host ""
-
-                $newKey = Read-MistralApiKeyWithValidation
-
-                if ($newKey -and $newKey -ne "") {
-                    if (Set-DpapiKeyToFile -FilePath $MISTRAL_KEY_PATH -KeyValue $newKey) {
-                        Write-Host "[OK] Mistral API key stored: $MISTRAL_KEY_PATH (DPAPI encrypted)" -ForegroundColor Green
-                    }
-                }
-                elseif ($null -eq $newKey) {
-                    Write-Host "[ERROR] Validation failed after maximum attempts" -ForegroundColor Red
-                }
-                else {
-                    Write-Host "[INFO] Operation cancelled - no key provided" -ForegroundColor Yellow
-                }
-
+                Update-DpapiKey `
+                    -Label "Real OpenAI key (~/.openai_api_key, shared with Pinecone)" `
+                    -FilePath $OPENAI_KEY_PATH `
+                    -ValidatorName "Test-RealOpenAiApiKey" `
+                    -Hint "sk-proj-... or sk-... (must be a real OpenAI key, not Inception or OpenRouter)"
                 Write-Host ""
                 Read-Host "Press Enter to continue"
             }
 
             "4" {
-                Write-Host ""
-                Write-Host "Key Validation" -ForegroundColor Cyan
-                Write-Host "==============" -ForegroundColor Cyan
-                Test-CourtListenerConnection
-                Write-Host ""
-                Test-OpenAiKeyFormat
-                Test-MistralKeyFormat
+                Update-DpapiKey `
+                    -Label "Chat API key (~/.openai_compatible_api_key, any provider)" `
+                    -FilePath $OPENAI_COMPATIBLE_KEY_PATH `
+                    -ValidatorName "Test-OpenAiApiKey" `
+                    -Hint "sk-proj-... (OpenAI), sk_... (Inception), sk-or-... (OpenRouter), ollama"
                 Write-Host ""
                 Read-Host "Press Enter to continue"
             }
 
             "5" {
+                Update-DpapiKey `
+                    -Label "Embedding API key (~/.embedding_api_key)" `
+                    -FilePath $EMBEDDING_KEY_PATH `
+                    -ValidatorName "Test-RealOpenAiApiKey" `
+                    -Hint "sk-proj-... or sk-... (real OpenAI key for embeddings)"
+                Write-Host ""
+                Read-Host "Press Enter to continue"
+            }
+
+            "6" {
+                Update-DpapiKey `
+                    -Label "Pinecone API key (~/.pinecone_api_key)" `
+                    -FilePath $PINECONE_KEY_PATH `
+                    -ValidatorName "Test-PineconeApiKey" `
+                    -Hint "pcsk_ + 70 alphanumeric/underscore chars (75 total)"
+                Write-Host ""
+                Read-Host "Press Enter to continue"
+            }
+
+            "7" {
+                Update-DpapiKey `
+                    -Label "Cohere reranking key (~/.cohere_api_key)" `
+                    -FilePath $COHERE_KEY_PATH `
+                    -ValidatorName "Test-CohereApiKey" `
+                    -Hint "40 alphanumeric characters"
+                Write-Host ""
+                Read-Host "Press Enter to continue"
+            }
+
+            "8" {
+                Update-DpapiKey `
+                    -Label "Mistral OCR key (~/.pinecone_mistral_api_key)" `
+                    -FilePath $PINECONE_MISTRAL_KEY_PATH `
+                    -ValidatorName "Test-MistralApiKey" `
+                    -Hint "32 alphanumeric characters (optional)"
+                Write-Host ""
+                Read-Host "Press Enter to continue"
+            }
+
+            "9" {
                 Write-Host ""
                 Write-Host "Remove API Key(s)" -ForegroundColor Cyan
                 Write-Host "=================" -ForegroundColor Cyan
                 Write-Host "  [1] Remove CourtListener token"
-                Write-Host "  [2] Remove OpenAI API key"
-                Write-Host "  [3] Remove Mistral API key"
-                Write-Host "  [4] Remove ALL keys"
-                Write-Host "  [5] Cancel"
+                Write-Host "  [2] Remove real OpenAI key"
+                Write-Host "  [3] Remove chat API key"
+                Write-Host "  [4] Remove embedding API key"
+                Write-Host "  [5] Remove Pinecone key"
+                Write-Host "  [6] Remove Cohere key"
+                Write-Host "  [7] Remove Mistral OCR key"
+                Write-Host "  [8] Remove ALL keys"
+                Write-Host "  [9] Cancel"
                 Write-Host ""
 
-                $removeChoice = Read-Host "Enter choice (1-5)"
+                $removeChoice = Read-Host "Enter choice (1-9)"
 
                 switch ($removeChoice) {
                     "1" {
                         $confirm = Read-Host "Remove CourtListener token from ALL storage locations? (y/N)"
-                        if ($confirm -eq 'y' -or $confirm -eq 'Y') {
-                            Remove-CourtListenerToken
-                        }
+                        if ($confirm -eq 'y' -or $confirm -eq 'Y') { Remove-CourtListenerToken }
                         else { Write-Host "[INFO] Cancelled" -ForegroundColor Yellow }
                     }
-                    "2" { Remove-OptionalKey -FilePath $OPENAI_KEY_PATH -KeyName "OpenAI" }
-                    "3" { Remove-OptionalKey -FilePath $MISTRAL_KEY_PATH -KeyName "Mistral" }
-                    "4" {
+                    "2" { Remove-DpapiKey -FilePath $OPENAI_KEY_PATH -KeyName "Real OpenAI" }
+                    "3" { Remove-DpapiKey -FilePath $OPENAI_COMPATIBLE_KEY_PATH -KeyName "Chat API" }
+                    "4" { Remove-DpapiKey -FilePath $EMBEDDING_KEY_PATH -KeyName "Embedding" }
+                    "5" { Remove-DpapiKey -FilePath $PINECONE_KEY_PATH -KeyName "Pinecone" }
+                    "6" { Remove-DpapiKey -FilePath $COHERE_KEY_PATH -KeyName "Cohere" }
+                    "7" { Remove-DpapiKey -FilePath $PINECONE_MISTRAL_KEY_PATH -KeyName "Mistral OCR" }
+                    "8" {
                         $confirm = Read-Host "Remove ALL API keys from ALL storage locations? (y/N)"
                         if ($confirm -eq 'y' -or $confirm -eq 'Y') {
                             Remove-CourtListenerToken
-                            Remove-OptionalKey -FilePath $OPENAI_KEY_PATH -KeyName "OpenAI"
-                            Remove-OptionalKey -FilePath $MISTRAL_KEY_PATH -KeyName "Mistral"
+                            Remove-DpapiKey -FilePath $OPENAI_KEY_PATH -KeyName "Real OpenAI"
+                            Remove-DpapiKey -FilePath $OPENAI_COMPATIBLE_KEY_PATH -KeyName "Chat API"
+                            Remove-DpapiKey -FilePath $EMBEDDING_KEY_PATH -KeyName "Embedding"
+                            Remove-DpapiKey -FilePath $PINECONE_KEY_PATH -KeyName "Pinecone"
+                            Remove-DpapiKey -FilePath $COHERE_KEY_PATH -KeyName "Cohere"
+                            Remove-DpapiKey -FilePath $PINECONE_MISTRAL_KEY_PATH -KeyName "Mistral OCR"
                         }
                         else { Write-Host "[INFO] Cancelled" -ForegroundColor Yellow }
                     }
-                    "5" { Write-Host "[INFO] Cancelled" -ForegroundColor Yellow }
+                    "9" { Write-Host "[INFO] Cancelled" -ForegroundColor Yellow }
                     default { Write-Host "[ERROR] Invalid choice" -ForegroundColor Red }
                 }
 
@@ -628,19 +672,19 @@ function Main {
                 Read-Host "Press Enter to continue"
             }
 
-            "6" {
+            "M" {
                 Invoke-MigrateCourtListenerToken
                 Write-Host ""
                 Read-Host "Press Enter to continue"
             }
 
-            "7" {
+            "R" {
                 Show-ApiKeyRequirements
                 Write-Host ""
                 Read-Host "Press Enter to continue"
             }
 
-            "8" {
+            "0" {
                 Write-Host ""
                 Write-Host "Goodbye!" -ForegroundColor Green
                 exit 0
@@ -648,7 +692,7 @@ function Main {
 
             default {
                 Write-Host ""
-                Write-Host "[ERROR] Invalid choice. Please enter 1-8." -ForegroundColor Red
+                Write-Host "[ERROR] Invalid choice." -ForegroundColor Red
                 Start-Sleep -Seconds 2
             }
         }

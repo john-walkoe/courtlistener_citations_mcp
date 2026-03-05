@@ -1,25 +1,34 @@
 <#
 .SYNOPSIS
-API Key and Input Validation Module for CourtListener Citation MCP (PowerShell)
+Unified API Key Validation Module for MCP Suite (PowerShell)
 
 .DESCRIPTION
-Provides validation functions for:
-  - CourtListener API token  (40-char hex string, required)
-  - OpenAI API key           (sk- prefix, variable length, optional)
-  - Mistral API key          (32-char alphanumeric, optional)
+Provides validation functions for all API keys used across the MCP suite:
+  CourtListener Citations MCP, Pinecone RAG MCP, Pinecone diff-RAG MCP,
+  and future MCP endpoints sharing the same DPAPI key store.
 
-Also provides shared utilities: placeholder detection, path security,
-secure secret generation, masked input, and display masking.
+Validators:
+  Test-CourtListenerToken       - 40-char hex token (required for CL MCP)
+  Test-PineconeApiKey           - pcsk_ prefix, 75 chars
+  Test-OpenAiApiKey             - any OpenAI-compatible provider (lenient, optional)
+  Test-RealOpenAiApiKey         - real OpenAI only (sk-proj- / sk-, strict)
+  Test-CohereApiKey             - 40 alphanumeric chars
+  Test-MistralApiKey            - 32 alphanumeric chars (optional)
 
-Security: Prevents deployment with invalid or placeholder keys.
+Shared utilities:
+  Test-PlaceholderPattern       - detect placeholder strings
+  Test-PathSecurity             - validate directory paths
+  New-SecureSecret              - generate cryptographic random secret
+  Read-ApiKeySecure             - masked key input
+  Hide-ApiKey                   - mask key for display
+  Read-CourtListenerTokenWithValidation
+  Read-OpenAiApiKeyWithValidation  (lenient, any provider, optional)
+  Read-MistralApiKeyWithValidation
+  Show-ApiKeyRequirements
 
 .NOTES
-Version: 1.0.0
-Project: CourtListener Citation Validation MCP
-
-.EXAMPLE
-Import-Module .\Validation-Helpers.psm1
-Test-CourtListenerToken -Token $myToken
+Version: 2.0.0
+Projects: CourtListener MCP, Pinecone RAG MCP, Pinecone diff-RAG MCP
 #>
 
 # ============================================
@@ -87,30 +96,81 @@ function Test-CourtListenerToken {
     return $true
 }
 
+function Test-PineconeApiKey {
+    <#
+    .SYNOPSIS
+    Validates Pinecone API key format.
+
+    .DESCRIPTION
+    Pinecone API Key Format:
+      - Prefix: pcsk_
+      - Length: 75 characters total
+      - Characters: Letters (a-z, A-Z), numbers (0-9), and underscores (_)
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ApiKey,
+
+        [Parameter(Mandatory=$false)]
+        [switch]$Silent
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        if (-not $Silent) { Write-Host "[ERROR] Pinecone API key is empty" -ForegroundColor Red }
+        return $false
+    }
+
+    if (-not $ApiKey.StartsWith("pcsk_")) {
+        if (-not $Silent) {
+            Write-Host "[ERROR] Pinecone API key must start with 'pcsk_'" -ForegroundColor Red
+            Write-Host "        Expected format: pcsk_XXXX... (75 chars total)" -ForegroundColor Yellow
+        }
+        return $false
+    }
+
+    if ($ApiKey.Length -ne 75) {
+        if (-not $Silent) {
+            Write-Host "[ERROR] Pinecone API key must be exactly 75 characters (got $($ApiKey.Length))" -ForegroundColor Red
+            Write-Host "        Expected format: pcsk_ + 70 alphanumeric/underscore chars" -ForegroundColor Yellow
+        }
+        return $false
+    }
+
+    if ($ApiKey -notmatch '^pcsk_[a-zA-Z0-9_]{70}$') {
+        if (-not $Silent) {
+            Write-Host "[ERROR] Pinecone API key contains invalid characters" -ForegroundColor Red
+            Write-Host "        Must be: pcsk_ followed by letters, numbers, and underscores" -ForegroundColor Yellow
+        }
+        return $false
+    }
+
+    if (Test-PlaceholderPattern -Value $ApiKey -KeyType "Pinecone" -Silent:$Silent) { return $false }
+
+    if (-not $Silent) { Write-Host "[OK] Pinecone API key format validated (75 chars, pcsk_...)" -ForegroundColor Green }
+    return $true
+}
+
 function Test-OpenAiApiKey {
     <#
     .SYNOPSIS
-    Validates an OpenAI API key format (optional key).
+    Validates a chat endpoint API key (any OpenAI-compatible provider, lenient).
 
     .DESCRIPTION
-    OpenAI API Key Format:
-      - Prefix: Starts with "sk-" (classic) or "sk-proj-" (project keys)
-      - Length: Minimum 20 characters
-      - Characters: Alphanumeric, hyphens, underscores
+    Accepts any non-placeholder key of at least 4 characters, or empty (optional).
+    Use this for ~/.openai_compatible_api_key - the chat/analysis endpoint key.
+    Covers all supported providers:
+      - Real OpenAI    : sk-proj-XXXX... or sk-XXXX...
+      - Inception Labs : sk_XXXX...       (underscore, not hyphen)
+      - OpenRouter     : sk-or-XXXX...
+      - Ollama         : "ollama"         (literal string)
+      - Other local    : any non-empty, non-placeholder string
 
-    Ollama local endpoint: The value "ollama" (or "ollama:<model>") is also
-    accepted, since Ollama's OpenAI-compatible endpoint ignores the key value.
+    For validating ~/.openai_api_key or ~/.embedding_api_key (real OpenAI
+    only), use Test-RealOpenAiApiKey instead.
 
-    Empty value is accepted (OpenAI/Ollama is optional for this MCP).
-
-    .PARAMETER ApiKey
-    The API key to validate. May be empty (optional).
-
-    .PARAMETER Silent
-    If specified, suppress output and return only boolean.
-
-    .OUTPUTS
-    Boolean - $true if valid or empty, $false if provided but invalid.
+    Empty value is accepted (key is optional); returns $true with info message.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -123,69 +183,45 @@ function Test-OpenAiApiKey {
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        if (-not $Silent) { Write-Host "[INFO] OpenAI/Ollama API key is optional - skipping validation" -ForegroundColor Cyan }
+        if (-not $Silent) { Write-Host "[INFO] OpenAI-compatible API key is optional - skipping validation" -ForegroundColor Cyan }
         return $true
     }
 
-    # Accept Ollama local endpoint key values - Ollama ignores the key entirely
-    # Matches: "ollama", "ollama:modelname", "OLLAMA", etc.
-    if ($ApiKey -match '^ollama(:[a-zA-Z0-9._/-]+)?$') {
+    if ($ApiKey.Length -lt 4) {
         if (-not $Silent) {
-            Write-Host "[OK] Ollama local endpoint key accepted ('$ApiKey')" -ForegroundColor Green
-            Write-Host "     Note: Ollama ignores API key values on its OpenAI-compatible endpoint" -ForegroundColor Gray
-        }
-        return $true
-    }
-
-    if ($ApiKey.Length -lt 20) {
-        if (-not $Silent) {
-            Write-Host "[ERROR] OpenAI API key is too short ($($ApiKey.Length) chars, minimum 20)" -ForegroundColor Red
-            Write-Host "        Expected format: sk-... or sk-proj-... (alphanumeric, hyphens, underscores)" -ForegroundColor Yellow
-            Write-Host "        For local Ollama use, enter: ollama" -ForegroundColor Yellow
+            Write-Host "[ERROR] API key is too short (got $($ApiKey.Length) chars, minimum 4)" -ForegroundColor Red
         }
         return $false
     }
 
-    if ($ApiKey -notmatch '^sk-[a-zA-Z0-9_-]+$') {
-        if (-not $Silent) {
-            Write-Host "[ERROR] OpenAI API key must start with 'sk-' and contain only letters, numbers, hyphens, underscores" -ForegroundColor Red
-            Write-Host "        Invalid format detected" -ForegroundColor Yellow
-            Write-Host "        For local Ollama use, enter: ollama" -ForegroundColor Yellow
-        }
-        return $false
-    }
-
-    if (Test-PlaceholderPattern -Value $ApiKey -KeyType "OpenAI" -Silent:$Silent) {
-        return $false
-    }
+    if (Test-PlaceholderPattern -Value $ApiKey -KeyType "chat API" -Silent:$Silent) { return $false }
 
     if (-not $Silent) {
-        Write-Host "[OK] OpenAI API key format validated (sk- prefix, $($ApiKey.Length) chars)" -ForegroundColor Green
+        $provider = if ($ApiKey.StartsWith("sk-proj-"))   { "OpenAI (new format)" } `
+                    elseif ($ApiKey.StartsWith("sk-or-")) { "OpenRouter" } `
+                    elseif ($ApiKey.StartsWith("sk-"))    { "OpenAI (legacy)" } `
+                    elseif ($ApiKey.StartsWith("sk_"))    { "Inception Labs" } `
+                    elseif ($ApiKey -eq "ollama")         { "Ollama" } `
+                    else                                  { "custom/local endpoint" }
+        Write-Host "[OK] API key accepted ($provider format)" -ForegroundColor Green
     }
     return $true
 }
 
-function Test-MistralApiKey {
+function Test-RealOpenAiApiKey {
     <#
     .SYNOPSIS
-    Validates a Mistral API key format (optional key).
+    Validates a REAL OpenAI API key (sk-proj-... or sk-..., strict).
 
     .DESCRIPTION
-    Mistral API Key Format:
-      - Length: Exactly 32 characters
-      - Characters: Alphanumeric (a-z, A-Z, 0-9)
-      - Example: AbCdEfGh1234567890IjKlMnOp1234
+    Strictly validates keys issued by api.openai.com only.
+    Rejects Inception Labs (sk_), OpenRouter (sk-or-), and non-OpenAI strings.
 
-    Empty value is accepted (Mistral is optional for this MCP).
+    Use this to validate keys stored in:
+      ~/.openai_api_key     - shared real-OpenAI key (CourtListener, Pinecone, etc.)
+      ~/.embedding_api_key  - when using OpenAI for embeddings
 
-    .PARAMETER ApiKey
-    The API key to validate. May be empty (optional).
-
-    .PARAMETER Silent
-    If specified, suppress output and return only boolean.
-
-    .OUTPUTS
-    Boolean - $true if valid or empty, $false if provided but invalid.
+    Empty value is accepted (key is optional); returns $true with info message.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -197,6 +233,109 @@ function Test-MistralApiKey {
         [switch]$Silent
     )
 
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        if (-not $Silent) { Write-Host "[INFO] OpenAI API key is optional - skipping validation" -ForegroundColor Cyan }
+        return $true
+    }
+
+    # Must start with sk-proj- (new format) or sk- (legacy) but NOT sk_ (Inception) or sk-or- (OpenRouter)
+    if (-not ($ApiKey.StartsWith("sk-proj-") -or ($ApiKey.StartsWith("sk-") -and -not $ApiKey.StartsWith("sk-or-")))) {
+        if (-not $Silent) {
+            Write-Host "[ERROR] This must be a real OpenAI key (starts with 'sk-proj-' or 'sk-')" -ForegroundColor Red
+            Write-Host "        Inception Labs keys start with 'sk_' (underscore). Use Test-OpenAiApiKey for any-provider validation." -ForegroundColor Yellow
+            Write-Host "        OpenRouter keys start with 'sk-or-'. Not valid for real OpenAI key storage." -ForegroundColor Yellow
+            Write-Host "        Get your key at: platform.openai.com/api-keys" -ForegroundColor Gray
+        }
+        return $false
+    }
+
+    if ($ApiKey.Length -lt 20) {
+        if (-not $Silent) {
+            Write-Host "[ERROR] OpenAI API key too short (got $($ApiKey.Length) chars)" -ForegroundColor Red
+        }
+        return $false
+    }
+
+    if (Test-PlaceholderPattern -Value $ApiKey -KeyType "OpenAI" -Silent:$Silent) { return $false }
+
+    if (-not $Silent) {
+        $fmt = if ($ApiKey.StartsWith("sk-proj-")) { "sk-proj-... (new format)" } else { "sk-... (legacy format)" }
+        Write-Host "[OK] OpenAI API key accepted ($fmt)" -ForegroundColor Green
+    }
+    return $true
+}
+
+function Test-CohereApiKey {
+    <#
+    .SYNOPSIS
+    Validates Cohere API key format.
+
+    .DESCRIPTION
+    Cohere API Key Format:
+      - Length: 40 characters
+      - Characters: Letters (a-z, A-Z) and numbers (0-9)
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ApiKey,
+
+        [Parameter(Mandatory=$false)]
+        [switch]$Silent
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        if (-not $Silent) { Write-Host "[ERROR] Cohere API key is empty" -ForegroundColor Red }
+        return $false
+    }
+
+    if ($ApiKey.Length -ne 40) {
+        if (-not $Silent) {
+            Write-Host "[ERROR] Cohere API key must be exactly 40 characters (got $($ApiKey.Length))" -ForegroundColor Red
+            Write-Host "        Expected format: 40 alphanumeric characters (a-z, A-Z, 0-9)" -ForegroundColor Yellow
+        }
+        return $false
+    }
+
+    if ($ApiKey -notmatch '^[a-zA-Z0-9]{40}$') {
+        if (-not $Silent) {
+            Write-Host "[ERROR] Cohere API key must contain only letters and numbers" -ForegroundColor Red
+        }
+        return $false
+    }
+
+    if (Test-PlaceholderPattern -Value $ApiKey -KeyType "Cohere" -Silent:$Silent) { return $false }
+
+    if (-not $Silent) { Write-Host "[OK] Cohere API key format validated (40 chars, alphanumeric)" -ForegroundColor Green }
+    return $true
+}
+
+function Test-MistralApiKey {
+    <#
+    .SYNOPSIS
+    Validates Mistral API key format (optional key).
+
+    .DESCRIPTION
+    Mistral API Key Format:
+      - Length: Exactly 32 characters
+      - Characters: Letters (a-z, A-Z) and numbers (0-9)
+      - Empty string is valid (Mistral is optional)
+
+    Note: This validates keys stored in ~/.pinecone_mistral_api_key.
+    The ~/.mistral_api_key file belongs to USPTO MCPs; do not use it here.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory=$false)]
+        [string]$ApiKey,
+
+        [Parameter(Mandatory=$false)]
+        [switch]$Silent
+    )
+
+    # Empty is OK (Mistral is optional)
     if ([string]::IsNullOrWhiteSpace($ApiKey)) {
         if (-not $Silent) { Write-Host "[INFO] Mistral API key is optional - skipping validation" -ForegroundColor Cyan }
         return $true
@@ -218,9 +357,7 @@ function Test-MistralApiKey {
         return $false
     }
 
-    if (Test-PlaceholderPattern -Value $ApiKey -KeyType "Mistral" -Silent:$Silent) {
-        return $false
-    }
+    if (Test-PlaceholderPattern -Value $ApiKey -KeyType "Mistral" -Silent:$Silent) { return $false }
 
     if (-not $Silent) {
         Write-Host "[OK] Mistral API key format validated (32 chars, alphanumeric)" -ForegroundColor Green
@@ -388,7 +525,7 @@ function New-SecureSecret {
 }
 
 # ============================================
-# Shared: Masked Input
+# Shared: Masked Input and Display
 # ============================================
 
 function Read-ApiKeySecure {
@@ -414,6 +551,43 @@ function Read-ApiKeySecure {
     $key = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
     [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
     return $key
+}
+
+function Hide-ApiKey {
+    <#
+    .SYNOPSIS
+    Masks an API key for safe display, showing only the last N characters.
+
+    .PARAMETER ApiKey
+    The key to mask.
+
+    .PARAMETER VisibleChars
+    Number of characters to show at the end (default 5).
+
+    .OUTPUTS
+    String - Masked key, e.g. "***...abcde".
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ApiKey,
+
+        [Parameter(Mandatory=$false)]
+        [int]$VisibleChars = 5
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+        return "[Not set]"
+    }
+    elseif ($ApiKey.Length -le $VisibleChars) {
+        return "***"
+    }
+    else {
+        $asterisks = '*' * ($ApiKey.Length - $VisibleChars)
+        $visible   = $ApiKey.Substring($ApiKey.Length - $VisibleChars)
+        return "$asterisks$visible"
+    }
 }
 
 # ============================================
@@ -470,10 +644,13 @@ function Read-CourtListenerTokenWithValidation {
 function Read-OpenAiApiKeyWithValidation {
     <#
     .SYNOPSIS
-    Prompts for an OpenAI API key with validation retry loop (optional key).
+    Prompts for an OpenAI-compatible API key with validation retry loop (optional).
 
     .DESCRIPTION
-    Press Enter to skip - OpenAI is optional for this MCP.
+    Accepts any supported provider key or press Enter to skip.
+    Suitable for ~/.openai_compatible_api_key (any provider).
+    For real OpenAI keys only (~/openai_api_key, ~/.embedding_api_key), prompt
+    inline using Test-RealOpenAiApiKey.
 
     .PARAMETER MaxAttempts
     Maximum number of attempts before giving up (default 3).
@@ -488,18 +665,22 @@ function Read-OpenAiApiKeyWithValidation {
         [int]$MaxAttempts = 3
     )
 
-    Write-Host "[INFO] OpenAI/Ollama API key is OPTIONAL (for OCR / Chat endpoint use)" -ForegroundColor Cyan
-    Write-Host "[INFO] Press Enter to skip, enter your OpenAI key (sk-...), or enter 'ollama' for a local Ollama endpoint" -ForegroundColor Cyan
+    Write-Host "[INFO] API key is OPTIONAL - press Enter to skip" -ForegroundColor Cyan
+    Write-Host "[INFO] Supported providers:" -ForegroundColor Cyan
+    Write-Host "         Real OpenAI    : sk-proj-... or sk-..." -ForegroundColor Gray
+    Write-Host "         Inception Labs : sk_..." -ForegroundColor Gray
+    Write-Host "         OpenRouter     : sk-or-..." -ForegroundColor Gray
+    Write-Host "         Ollama (local) : ollama" -ForegroundColor Gray
     Write-Host ""
 
     $attempt = 0
 
     while ($attempt -lt $MaxAttempts) {
         $attempt++
-        $key = Read-ApiKeySecure -Prompt "Enter your OpenAI API key (or press Enter to skip)"
+        $key = Read-ApiKeySecure -Prompt "Enter your API key (or press Enter to skip)"
 
         if ([string]::IsNullOrWhiteSpace($key)) {
-            Write-Host "[INFO] Skipping OpenAI API key" -ForegroundColor Yellow
+            Write-Host "[INFO] Skipping API key" -ForegroundColor Yellow
             return ""
         }
 
@@ -511,22 +692,22 @@ function Read-OpenAiApiKeyWithValidation {
         else {
             if ($attempt -lt $MaxAttempts) {
                 Write-Host "[WARN] Attempt $attempt of $MaxAttempts - please try again" -ForegroundColor Yellow
-                Write-Host "[INFO] Format: starts with 'sk-' (OpenAI) or enter 'ollama' for local Ollama endpoint" -ForegroundColor Cyan
             }
         }
     }
 
-    Write-Host "[ERROR] Failed to provide valid OpenAI API key after $MaxAttempts attempts" -ForegroundColor Red
+    Write-Host "[ERROR] Failed to provide valid API key after $MaxAttempts attempts" -ForegroundColor Red
     return $null
 }
 
 function Read-MistralApiKeyWithValidation {
     <#
     .SYNOPSIS
-    Prompts for a Mistral API key with validation retry loop (optional key).
+    Prompts for a Mistral API key with validation retry loop (optional).
 
     .DESCRIPTION
-    Press Enter to skip - Mistral is optional for this MCP.
+    Press Enter to skip - Mistral is optional.
+    Validates keys stored in ~/.pinecone_mistral_api_key.
 
     .PARAMETER MaxAttempts
     Maximum number of attempts before giving up (default 3).
@@ -580,74 +761,72 @@ function Read-MistralApiKeyWithValidation {
 function Show-ApiKeyRequirements {
     <#
     .SYNOPSIS
-    Displays API key format requirements for this MCP.
+    Displays API key format requirements for the MCP suite.
     #>
     [CmdletBinding()]
     param()
 
     Write-Host ""
-    Write-Host "API Key Requirements - CourtListener Citation Validation MCP" -ForegroundColor Cyan
-    Write-Host "==============================================================" -ForegroundColor Cyan
+    Write-Host "API Key Requirements - MCP Suite" -ForegroundColor Cyan
+    Write-Host "==================================" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "CourtListener API Token:" -ForegroundColor White
-    Write-Host "  - Required: YES" -ForegroundColor Green
-    Write-Host "  - Length:   Exactly 40 characters"
-    Write-Host "  - Format:   Lowercase hex only (a-f, 0-9)"
-    Write-Host "  - Example:  a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
-    Write-Host "  - Get from: https://www.courtlistener.com/sign-in/" -ForegroundColor Yellow
+
+    Write-Host "CourtListener API Token  (~/.courtlistener_api_token):" -ForegroundColor White
+    Write-Host "  Required:   YES (for CourtListener MCP)" -ForegroundColor Green
+    Write-Host "  Length:     Exactly 40 characters"
+    Write-Host "  Format:     Lowercase hex only (a-f, 0-9)"
+    Write-Host "  Example:    a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+    Write-Host "  Storage:    Windows Credential Manager (primary) + DPAPI file (backup)"
     Write-Host ""
-    Write-Host "OpenAI / Ollama API Key:" -ForegroundColor White
-    Write-Host "  - Required: NO (optional, for OCR / Chat endpoint)" -ForegroundColor Yellow
-    Write-Host "  - OpenAI:   Starts with 'sk-', alphanumeric + hyphens/underscores"
-    Write-Host "  - Example:  sk-proj-AbCdEfGh..."
-    Write-Host "  - Get from: https://platform.openai.com/api-keys" -ForegroundColor Yellow
-    Write-Host "  - Ollama:   Enter 'ollama' (or 'ollama:modelname') for a local Ollama endpoint"
-    Write-Host "              Ollama's OpenAI-compatible endpoint ignores the key value" -ForegroundColor Gray
+
+    Write-Host "Pinecone API Key  (~/.pinecone_api_key):" -ForegroundColor White
+    Write-Host "  Required:   For Pinecone MCPs" -ForegroundColor Yellow
+    Write-Host "  Length:     Exactly 75 characters"
+    Write-Host "  Format:     pcsk_ + 70 alphanumeric/underscore chars"
+    Write-Host "  Example:    pcsk_AbCdEfGh..."
+    Write-Host "  Storage:    Windows Credential Manager + DPAPI file"
     Write-Host ""
-    Write-Host "Mistral API Key:" -ForegroundColor White
-    Write-Host "  - Required: NO (optional, for OCR on scanned documents)" -ForegroundColor Yellow
-    Write-Host "  - Length:   Exactly 32 characters"
-    Write-Host "  - Format:   Alphanumeric (a-z, A-Z, 0-9)"
-    Write-Host "  - Example:  AbCdEfGh1234567890IjKlMnOp1234"
-    Write-Host "  - Get from: https://console.mistral.ai/" -ForegroundColor Yellow
+
+    Write-Host "Real OpenAI API Key  (~/.openai_api_key, shared across MCPs):" -ForegroundColor White
+    Write-Host "  Required:   NO (optional, for chat/completion with real OpenAI)" -ForegroundColor Yellow
+    Write-Host "  Format:     sk-proj-... (new) or sk-... (legacy), OpenAI only"
+    Write-Host "  Rejects:    Inception (sk_) and OpenRouter (sk-or-); use compatible key for those"
+    Write-Host "  Storage:    DPAPI encrypted file"
     Write-Host ""
-}
 
-function Hide-ApiKey {
-    <#
-    .SYNOPSIS
-    Masks an API key for safe display, showing only the last N characters.
+    Write-Host "Chat API Key  (~/.openai_compatible_api_key, any provider):" -ForegroundColor White
+    Write-Host "  Required:   NO (optional)" -ForegroundColor Yellow
+    Write-Host "  Providers:  OpenAI sk-proj-/sk-, Inception sk_, OpenRouter sk-or-, ollama"
+    Write-Host "  Storage:    DPAPI encrypted file"
+    Write-Host ""
 
-    .PARAMETER ApiKey
-    The key to mask.
+    Write-Host "Embedding API Key  (~/.embedding_api_key):" -ForegroundColor White
+    Write-Host "  Required:   NO (optional, usually real OpenAI)" -ForegroundColor Yellow
+    Write-Host "  Format:     sk-proj-... or sk-... (real OpenAI key for embeddings)"
+    Write-Host "  Storage:    DPAPI encrypted file"
+    Write-Host ""
 
-    .PARAMETER VisibleChars
-    Number of characters to show at the end (default 5).
+    Write-Host "Cohere API Key  (~/.cohere_api_key):" -ForegroundColor White
+    Write-Host "  Required:   NO (optional, for reranking)" -ForegroundColor Yellow
+    Write-Host "  Length:     Exactly 40 characters"
+    Write-Host "  Format:     Alphanumeric (a-z, A-Z, 0-9)"
+    Write-Host "  Storage:    DPAPI encrypted file"
+    Write-Host ""
 
-    .OUTPUTS
-    String - Masked key, e.g. "***...abcde".
-    #>
-    [CmdletBinding()]
-    [OutputType([string])]
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$ApiKey,
+    Write-Host "Mistral OCR Key  (~/.pinecone_mistral_api_key):" -ForegroundColor White
+    Write-Host "  Required:   NO (optional, for OCR on scanned documents)" -ForegroundColor Yellow
+    Write-Host "  Length:     Exactly 32 characters"
+    Write-Host "  Format:     Alphanumeric (a-z, A-Z, 0-9)"
+    Write-Host "  Note:       ~/.mistral_api_key belongs to USPTO MCPs; do NOT use it here"
+    Write-Host "  Storage:    DPAPI encrypted file"
+    Write-Host ""
 
-        [Parameter(Mandatory=$false)]
-        [int]$VisibleChars = 5
-    )
-
-    if ([string]::IsNullOrWhiteSpace($ApiKey)) {
-        return "[Not set]"
-    }
-    elseif ($ApiKey.Length -le $VisibleChars) {
-        return "***"
-    }
-    else {
-        $asterisks = '*' * ($ApiKey.Length - $VisibleChars)
-        $visible   = $ApiKey.Substring($ApiKey.Length - $VisibleChars)
-        return "$asterisks$visible"
-    }
+    Write-Host "Entropy Seed  (~/.uspto_internal_auth_secret):" -ForegroundColor White
+    Write-Host "  Purpose:    Shared DPAPI entropy for all MCP suite key files"
+    Write-Host "  Size:       32+ bytes (only first 32 used as entropy)"
+    Write-Host "  Created:    Automatically on first key operation"
+    Write-Host "  WARNING:    Deleting this makes all DPAPI key files unreadable" -ForegroundColor Red
+    Write-Host ""
 }
 
 # ============================================
@@ -656,15 +835,18 @@ function Hide-ApiKey {
 
 Export-ModuleMember -Function @(
     'Test-CourtListenerToken',
+    'Test-PineconeApiKey',
     'Test-OpenAiApiKey',
+    'Test-RealOpenAiApiKey',
+    'Test-CohereApiKey',
     'Test-MistralApiKey',
     'Test-PlaceholderPattern',
     'Test-PathSecurity',
     'New-SecureSecret',
     'Read-ApiKeySecure',
+    'Hide-ApiKey',
     'Read-CourtListenerTokenWithValidation',
     'Read-OpenAiApiKeyWithValidation',
     'Read-MistralApiKeyWithValidation',
-    'Show-ApiKeyRequirements',
-    'Hide-ApiKey'
+    'Show-ApiKeyRequirements'
 )
