@@ -137,6 +137,8 @@ CITATION_VIEW_HTML = """<!DOCTYPE html>
   .status-404 .status-dot { background: #ef4444; }
   .status-429 .status-dot { background: #8b5cf6; }
 
+  .citation-card.status-300 { border-left: 3px solid #f59e0b; }
+
   .citation-info { flex: 1; min-width: 0; }
 
   .citation-text {
@@ -302,6 +304,19 @@ CITATION_VIEW_HTML = """<!DOCTYPE html>
     vertical-align: middle;
   }
 
+  .dup-badge {
+    display: inline-block;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    background: #e2e8f0;
+    color: #64748b;
+    border-radius: 4px;
+    padding: 1px 5px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+
   .loading {
     text-align: center;
     padding: 40px;
@@ -368,7 +383,7 @@ const app = new App({ name: 'Citation Validation Results', version: '1.0.0' });
 
 const STATUS_LABELS = {
   200: 'Verified',
-  300: 'Ambiguous',
+  300: 'Suspect',
   400: 'Invalid Reporter',
   404: 'Not Found',
   429: 'Overflow',
@@ -425,9 +440,6 @@ function renderLookup(parsed) {
     html += '<div style="margin-top:8px;font-size:12px;color:#666;">This citation is likely fabricated or not yet indexed.</div>';
     html += '</div>';
     appEl.innerHTML = html;
-    requestAnimationFrame(() => {
-      app.sendNotification('ui/notifications/size-changed', { height: document.documentElement.scrollHeight });
-    });
     return;
   }
 
@@ -471,7 +483,7 @@ function renderValidation(parsed) {
   html += '<div class="summary">';
   html += '<div class="stat total"><span class="number">' + total + '</span><span class="label">Total</span></div>';
   html += '<div class="stat valid"><span class="number">' + valid + '</span><span class="label">Verified</span></div>';
-  if (ambiguous > 0) html += '<div class="stat ambiguous"><span class="number">' + ambiguous + '</span><span class="label">Ambiguous</span></div>';
+  if (ambiguous > 0) html += '<div class="stat ambiguous"><span class="number">' + ambiguous + '</span><span class="label">Suspect</span></div>';
   html += '<div class="stat not-found"><span class="number">' + notFound + '</span><span class="label">Not Found</span></div>';
   if (invalid > 0) html += '<div class="stat invalid"><span class="number">' + invalid + '</span><span class="label">Invalid</span></div>';
   if (overflow > 0) html += '<div class="stat invalid"><span class="number">' + overflow + '</span><span class="label">Overflow</span></div>';
@@ -481,18 +493,37 @@ function renderValidation(parsed) {
     html += '<div class="risk-banner risk-' + risk.level + '">' + escapeHtml(risk.text) + '</div>';
   }
 
-  html += '<div class="citations-list">';
+  // Collapse duplicate citations (same reporter string) — keep first occurrence, add ×N badge
+  const citMap = new Map();
   for (const cit of parsed.citations) {
+    const key = cit.citation || cit.normalized_citations?.[0] || 'Unknown';
+    if (!citMap.has(key)) citMap.set(key, { cit, count: 1 });
+    else citMap.get(key).count++;
+  }
+
+  html += '<div class="citations-list">';
+  for (const { cit, count } of citMap.values()) {
     const status = cit.status || 0;
-    const citText = cit.citation || cit.normalized_citations?.[0] || 'Unknown citation';
+    const reporter = cit.citation || cit.normalized_citations?.[0] || 'Unknown citation';
+
+    // Build full citation text: "Case Name, Reporter (Year)" for verified citations
+    let citText = reporter;
+    if (status === 200 && cit.clusters?.length > 0) {
+      const cl = cit.clusters[0];
+      const caseName = cl.case_name || '';
+      const year = cl.date_filed ? cl.date_filed.slice(0, 4) : '';
+      if (caseName) citText = caseName + ', ' + reporter + (year ? ' (' + year + ')' : '');
+    }
+
     const statusLabel = STATUS_LABELS[status] || 'Unknown';
     const links = buildClusterLinks(cit.clusters);
     const searchUrl = (status === 404 && cit.search_url && isValidHttpUrl(cit.search_url)) ? cit.search_url : null;
+    const dupBadge = count > 1 ? ' <span class="dup-badge">&times;' + count + '</span>' : '';
 
     html += '<div class="citation-card status-' + status + '">';
     html += '<div class="status-dot"></div>';
     html += '<div class="citation-info">';
-    html += '<div class="citation-text">' + escapeHtml(citText) + '</div>';
+    html += '<div class="citation-text">' + escapeHtml(citText) + dupBadge + '</div>';
     html += '<div class="citation-meta"><span class="status-label">' + statusLabel + '</span></div>';
     if (links) html += '<div class="citation-links">' + links + '</div>';
     if (searchUrl) html += '<div class="citation-links"><button data-url="' + escapeHtml(searchUrl) + '">Search CourtListener &rarr;</button></div>';
