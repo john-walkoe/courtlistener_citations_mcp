@@ -25,6 +25,7 @@ from .config.log_config import setup_logging
 from .config.settings import get_settings
 from .config.tool_guidance import SERVER_INSTRUCTIONS, get_guidance_section
 from .shared.safe_logger import get_safe_logger
+from .ui.citation_view import CITATION_VIEW_HTML
 
 setup_logging(log_level=os.getenv("LOG_LEVEL", "INFO"))
 logger = get_safe_logger(__name__)
@@ -42,6 +43,23 @@ mcp = FastMCP(
 # Register prompt templates
 from .prompts import register_prompts  # noqa: E402
 register_prompts(mcp)
+
+# =============================================================================
+# MCP APPS - UI RESOURCE
+# =============================================================================
+
+CITATION_VIEW_URI = "ui://courtlistener-mcp/citation-results.html"
+
+
+@mcp.resource(
+    CITATION_VIEW_URI,
+    mime_type="text/html;profile=mcp-app",
+    meta={"ui": {"csp": {"resourceDomains": ["https://cdn.jsdelivr.net"]}}},
+)
+def citation_view_resource() -> str:
+    """Interactive citation validation results view (MCP Apps)."""
+    return CITATION_VIEW_HTML
+
 
 # Lazy-initialized client
 _client: Optional[CourtListenerClient] = None
@@ -234,6 +252,7 @@ def _extract_case_summary(result: dict[str, Any]) -> dict[str, Any]:
         "readOnlyHint": True,
         "openWorldHint": True,
     },
+    meta={"ui": {"resourceUri": CITATION_VIEW_URI}},
 )
 @_handle_client_errors
 async def validate_citations(
@@ -927,9 +946,16 @@ async def health_check(request):
 # ASGI APP (for Docker/Uvicorn deployment)
 # =============================================================================
 
+from starlette.middleware.cors import CORSMiddleware
 from .shared.http_rate_limit import InboundRateLimitMiddleware
 
-app = InboundRateLimitMiddleware(mcp.http_app(path="/mcp"), max_requests=60, window_seconds=60)
+app = CORSMiddleware(
+    InboundRateLimitMiddleware(mcp.http_app(path="/mcp"), max_requests=60, window_seconds=60),
+    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["Mcp-Session-Id"],
+)
 
 
 # =============================================================================

@@ -189,6 +189,119 @@ CITATION_VIEW_HTML = """<!DOCTYPE html>
     background: #dbeafe;
   }
 
+  /* Case detail card (lookup_mode) */
+  .case-detail-header {
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #e0e0e0;
+  }
+
+  .case-detail-header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .query-label {
+    font-size: 12px;
+    color: #888;
+  }
+
+  .query-label span {
+    font-family: 'Georgia', serif;
+    color: #444;
+    font-weight: 500;
+  }
+
+  .case-card {
+    background: white;
+    border: 1px solid #e8e8e8;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 10px;
+  }
+
+  .case-card:hover {
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+  }
+
+  .case-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-bottom: 8px;
+  }
+
+  .case-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  .case-meta-item {
+    font-size: 12px;
+    color: #555;
+  }
+
+  .case-meta-item strong {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #999;
+    margin-bottom: 2px;
+  }
+
+  .open-cl-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #1d4ed8;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s;
+  }
+
+  .open-cl-btn:hover {
+    background: #1e40af;
+  }
+
+  .no-results {
+    text-align: center;
+    padding: 30px;
+    background: #fff8f8;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    color: #991b1b;
+    font-size: 14px;
+  }
+
+  .no-results .no-results-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  .citation-badge {
+    display: inline-block;
+    font-family: 'Georgia', serif;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-size: 13px;
+    color: #334155;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+
   .loading {
     text-align: center;
     padding: 40px;
@@ -226,6 +339,16 @@ CITATION_VIEW_HTML = """<!DOCTYPE html>
     .citation-meta { color: #999; }
     .citation-links button { background: #1e3a5f; border-color: #2563eb; color: #60a5fa; }
     .citation-links button:hover { background: #1e40af; }
+    /* Case detail dark mode */
+    .case-detail-header { border-bottom-color: #333; }
+    .case-detail-header h1 { color: #e0e0e0; }
+    .query-label { color: #777; }
+    .query-label span { color: #bbb; }
+    .case-card { background: #16213e; border-color: #333; }
+    .case-name { color: #e0e0e0; }
+    .case-meta-item { color: #aaa; }
+    .citation-badge { background: #1e3a5f; border-color: #334155; color: #93c5fd; }
+    .no-results { background: #2d1515; border-color: #7f1d1d; color: #fca5a5; }
   }
 </style>
 </head>
@@ -238,12 +361,10 @@ CITATION_VIEW_HTML = """<!DOCTYPE html>
 </div>
 
 <script type="module">
-import { App } from 'https://unpkg.com/@modelcontextprotocol/ext-apps@1/dist/app.js';
+import { App } from 'https://cdn.jsdelivr.net/npm/@modelcontextprotocol/ext-apps@1.2.0/dist/src/app-with-deps.js';
 
 const appEl = document.getElementById('app');
 const app = new App({ name: 'Citation Validation Results', version: '1.0.0' });
-
-app.connect();
 
 const STATUS_LABELS = {
   200: 'Verified',
@@ -281,22 +402,59 @@ function escapeHtml(str) {
   return d.innerHTML;
 }
 
-function render(data) {
-  let parsed;
-  try {
-    const text = data.content?.find(c => c.type === 'text')?.text;
-    parsed = text ? JSON.parse(text) : null;
-  } catch (e) {
-    appEl.innerHTML = '<div class="empty-state">Could not parse results.</div>';
+// URL safety check (sandboxed iframe blocks target="_blank" — use ui/openLink instead)
+function isValidHttpUrl(str) {
+  try { const u = new URL(str); return u.protocol === 'http:' || u.protocol === 'https:'; }
+  catch { return false; }
+}
+
+// ── Case-detail view (rendered by courtlistener_open_citation) ──────────────
+function renderLookup(parsed) {
+  const query = parsed.query || 'Unknown citation';
+  const cases = parsed.results || [];
+
+  let html = '<div class="case-detail-header">';
+  html += '<h1>CourtListener Lookup</h1>';
+  html += '<div class="query-label">Query: <span>' + escapeHtml(query) + '</span></div>';
+  html += '</div>';
+
+  if (cases.length === 0) {
+    html += '<div class="no-results">';
+    html += '<div class="no-results-title">Not Found on CourtListener</div>';
+    html += '<div>No cases matched <strong>' + escapeHtml(query) + '</strong>.</div>';
+    html += '<div style="margin-top:8px;font-size:12px;color:#666;">This citation is likely fabricated or not yet indexed.</div>';
+    html += '</div>';
+    appEl.innerHTML = html;
+    requestAnimationFrame(() => {
+      app.sendNotification('ui/notifications/size-changed', { height: document.documentElement.scrollHeight });
+    });
     return;
   }
 
-  if (!parsed || !parsed.citations || parsed.citations.length === 0) {
-    appEl.innerHTML = '<div class="empty-state">' + escapeHtml(parsed?.summary || 'No citations found.') + '</div>';
-    app.sendNotification('ui/notifications/size-changed', { height: 100 });
-    return;
+  for (const c of cases) {
+    const clUrl = c.courtlistener_url || '';
+    const citations = Array.isArray(c.citation) ? c.citation.join(', ') : (c.citation || '');
+
+    html += '<div class="case-card">';
+    html += '<div class="case-name">' + escapeHtml(c.case_name || 'Unknown') + '</div>';
+    html += '<div class="case-meta-grid">';
+    if (c.court)         html += '<div class="case-meta-item"><strong>Court</strong>' + escapeHtml(c.court) + '</div>';
+    if (c.date_filed)    html += '<div class="case-meta-item"><strong>Date Filed</strong>' + escapeHtml(c.date_filed) + '</div>';
+    if (c.docket_number) html += '<div class="case-meta-item"><strong>Docket</strong>' + escapeHtml(c.docket_number) + '</div>';
+    if (c.status)        html += '<div class="case-meta-item"><strong>Status</strong>' + escapeHtml(c.status) + '</div>';
+    if (citations)       html += '<div class="case-meta-item"><strong>Citations</strong><span class="citation-badge">' + escapeHtml(citations) + '</span></div>';
+    html += '</div>';
+    if (clUrl && isValidHttpUrl(clUrl)) {
+      html += '<button class="open-cl-btn" data-url="' + escapeHtml(clUrl) + '">&#8599; Open in CourtListener</button>';
+    }
+    html += '</div>';
   }
 
+  appEl.innerHTML = html;
+}
+
+// ── Validation summary view (rendered by courtlistener_validate_citations) ───
+function renderValidation(parsed) {
   const total = parsed.total_citations || parsed.citations.length;
   const valid = parsed.valid || 0;
   const ambiguous = parsed.ambiguous || 0;
@@ -341,30 +499,52 @@ function render(data) {
   html += '</div>';
 
   appEl.innerHTML = html;
-
-  requestAnimationFrame(() => {
-    const h = document.documentElement.scrollHeight;
-    app.sendNotification('ui/notifications/size-changed', { height: h });
-  });
 }
 
-// Open links via the MCP Apps SDK (sandboxed iframe blocks target="_blank")
-function isValidHttpUrl(str) {
-  try { const u = new URL(str); return u.protocol === 'http:' || u.protocol === 'https:'; }
-  catch { return false; }
+// ── Router ───────────────────────────────────────────────────────────────────
+function render(data) {
+  let parsed;
+  try {
+    const text = data.content?.find(c => c.type === 'text')?.text;
+    parsed = text ? JSON.parse(text) : null;
+  } catch (e) {
+    appEl.innerHTML = '<div class="empty-state">Could not parse results.</div>';
+    return;
+  }
+
+  if (!parsed) {
+    appEl.innerHTML = '<div class="empty-state">No data received.</div>';
+    return;
+  }
+
+  // open_citation result → case detail card
+  if (parsed.lookup_mode) {
+    renderLookup(parsed);
+    return;
+  }
+
+  // validate_citations result → citation summary
+  if (!parsed.citations || parsed.citations.length === 0) {
+    appEl.innerHTML = '<div class="empty-state">' + escapeHtml(parsed.summary || 'No citations found.') + '</div>';
+    return;
+  }
+
+  renderValidation(parsed);
 }
 
+// ── Click handler: open CourtListener URLs via the host (iframe can't do it) ─
 document.addEventListener('click', (e) => {
-  const btn = e.target.closest('.citation-links button[data-url]');
+  const btn = e.target.closest('[data-url]');
   if (btn) {
     const url = btn.getAttribute('data-url');
     if (url && isValidHttpUrl(url)) {
-      app.sendRequest('ui/openLink', { url });
+      app.openLink({ url });
     }
   }
 });
 
 app.ontoolresult = (result) => render(result);
+app.connect();
 </script>
 </body>
 </html>"""

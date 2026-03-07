@@ -16,3 +16,16 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  ui-host:
+    build: ./ui-host
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      # Must be localhost — this URL is used by the browser, not inside Docker
+      - SERVERS=["http://localhost:8000/mcp"]
+    depends_on:
+      courtlistener-mcp:
+        condition: service_healthy
+    restart: unless-stopped
