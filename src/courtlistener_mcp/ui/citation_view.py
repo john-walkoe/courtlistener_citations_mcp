@@ -138,6 +138,19 @@ CITATION_VIEW_HTML = """<!DOCTYPE html>
   .status-429 .status-dot { background: #8b5cf6; }
 
   .citation-card.status-300 { border-left: 3px solid #f59e0b; }
+  .citation-card.name-mismatch { border-left: 3px solid #f59e0b; }
+  .name-mismatch .status-dot { background: #f59e0b; }
+  .name-mismatch .status-label { background: #fef3c7; color: #92400e; }
+
+  .mismatch-detail {
+    font-size: 11px;
+    color: #92400e;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 4px;
+    padding: 3px 7px;
+    margin-top: 5px;
+  }
 
   .citation-info { flex: 1; min-width: 0; }
 
@@ -363,6 +376,7 @@ CITATION_VIEW_HTML = """<!DOCTYPE html>
     .case-name { color: #e0e0e0; }
     .case-meta-item { color: #aaa; }
     .citation-badge { background: #1e3a5f; border-color: #334155; color: #93c5fd; }
+    .mismatch-detail { background: #451a03; border-color: #78350f; color: #fde68a; }
     .no-results { background: #2d1515; border-color: #7f1d1d; color: #fca5a5; }
   }
 </style>
@@ -389,12 +403,14 @@ const STATUS_LABELS = {
   429: 'Overflow',
 };
 
-function getRiskLevel(total, notFound) {
+function getRiskLevel(total, notFound, nameMismatch) {
   if (total === 0) return null;
-  const pct = (notFound / total) * 100;
-  if (pct > 20) return { level: 'critical', text: 'CRITICAL RISK: >' + Math.round(pct) + '% citations not found - likely fabricated' };
-  if (pct > 10) return { level: 'high', text: 'HIGH RISK: ' + Math.round(pct) + '% citations not found - review carefully' };
-  if (pct > 5) return { level: 'medium', text: 'MEDIUM RISK: ' + Math.round(pct) + '% citations not found - some may be coverage gaps' };
+  const suspect = notFound + (nameMismatch || 0);
+  const pct = (suspect / total) * 100;
+  if (pct > 20) return { level: 'critical', text: 'CRITICAL RISK: >' + Math.round(pct) + '% citations suspect or not found - likely fabricated' };
+  if (pct > 10) return { level: 'high', text: 'HIGH RISK: ' + Math.round(pct) + '% citations suspect or not found - review carefully' };
+  if (pct > 5) return { level: 'medium', text: 'MEDIUM RISK: ' + Math.round(pct) + '% citations suspect or not found' };
+  if (nameMismatch > 0) return { level: 'high', text: 'HIGH RISK: ' + nameMismatch + ' citation(s) resolve to a DIFFERENT case than claimed' };
   if (notFound > 0) return { level: 'low', text: 'LOW RISK: ' + notFound + ' citation(s) not found - likely coverage gaps' };
   return { level: 'low', text: 'All citations verified successfully' };
 }
@@ -470,10 +486,11 @@ function renderValidation(parsed) {
   const total = parsed.total_citations || parsed.citations.length;
   const valid = parsed.valid || 0;
   const ambiguous = parsed.ambiguous || 0;
+  const mismatch = parsed.name_mismatch || 0;
   const notFound = parsed.not_found || 0;
   const invalid = parsed.invalid_reporter || 0;
   const overflow = parsed.overflow || 0;
-  const risk = getRiskLevel(total, notFound);
+  const risk = getRiskLevel(total, notFound, mismatch);
 
   let html = '<div class="header">';
   html += '<h1>Citation Validation</h1>';
@@ -484,6 +501,7 @@ function renderValidation(parsed) {
   html += '<div class="stat total"><span class="number">' + total + '</span><span class="label">Total</span></div>';
   html += '<div class="stat valid"><span class="number">' + valid + '</span><span class="label">Verified</span></div>';
   if (ambiguous > 0) html += '<div class="stat ambiguous"><span class="number">' + ambiguous + '</span><span class="label">Suspect</span></div>';
+  if (mismatch > 0) html += '<div class="stat ambiguous"><span class="number">' + mismatch + '</span><span class="label">Name Mismatch</span></div>';
   html += '<div class="stat not-found"><span class="number">' + notFound + '</span><span class="label">Not Found</span></div>';
   if (invalid > 0) html += '<div class="stat invalid"><span class="number">' + invalid + '</span><span class="label">Invalid</span></div>';
   if (overflow > 0) html += '<div class="stat invalid"><span class="number">' + overflow + '</span><span class="label">Overflow</span></div>';
@@ -505,26 +523,37 @@ function renderValidation(parsed) {
   for (const { cit, count } of citMap.values()) {
     const status = cit.status || 0;
     const reporter = cit.citation || cit.normalized_citations?.[0] || 'Unknown citation';
+    const isMismatch = !!(cit.name_mismatch);
 
-    // Build full citation text: "Case Name, Reporter (Year)" for verified citations
+    // Build full citation text
     let citText = reporter;
-    if (status === 200 && cit.clusters?.length > 0) {
+    if (isMismatch) {
+      // Show actual resolved case, not the claimed (wrong) one
+      const cl = cit.clusters?.[0];
+      const actualName = cit.actual_case_name || cl?.case_name || '';
+      const year = cl?.date_filed ? cl.date_filed.slice(0, 4) : '';
+      if (actualName) citText = actualName + ', ' + reporter + (year ? ' (' + year + ')' : '');
+    } else if (status === 200 && cit.clusters?.length > 0) {
       const cl = cit.clusters[0];
       const caseName = cl.case_name || '';
       const year = cl.date_filed ? cl.date_filed.slice(0, 4) : '';
       if (caseName) citText = caseName + ', ' + reporter + (year ? ' (' + year + ')' : '');
     }
 
-    const statusLabel = STATUS_LABELS[status] || 'Unknown';
+    const statusLabel = isMismatch ? 'Name Mismatch' : (STATUS_LABELS[status] || 'Unknown');
     const links = buildClusterLinks(cit.clusters);
     const searchUrl = (status === 404 && cit.search_url && isValidHttpUrl(cit.search_url)) ? cit.search_url : null;
     const dupBadge = count > 1 ? ' <span class="dup-badge">&times;' + count + '</span>' : '';
+    const cardClass = isMismatch ? 'citation-card name-mismatch' : 'citation-card status-' + status;
 
-    html += '<div class="citation-card status-' + status + '">';
+    html += '<div class="' + cardClass + '">';
     html += '<div class="status-dot"></div>';
     html += '<div class="citation-info">';
     html += '<div class="citation-text">' + escapeHtml(citText) + dupBadge + '</div>';
     html += '<div class="citation-meta"><span class="status-label">' + statusLabel + '</span></div>';
+    if (isMismatch && cit.claimed_case_name) {
+      html += '<div class="mismatch-detail">Claimed as: <em>' + escapeHtml(cit.claimed_case_name) + '</em></div>';
+    }
     if (links) html += '<div class="citation-links">' + links + '</div>';
     if (searchUrl) html += '<div class="citation-links"><button data-url="' + escapeHtml(searchUrl) + '">Search CourtListener &rarr;</button></div>';
     html += '</div></div>';

@@ -189,6 +189,31 @@ def _build_courtlistener_url(cluster_id: int, case_name: str = "") -> str:
     return OPINION_URL_TEMPLATE.format(cluster_id=cluster_id, slug=slug)
 
 
+_NAME_STOP = frozenset({
+    "v", "vs", "the", "a", "an", "in", "re", "ex", "parte",
+    "inc", "corp", "llc", "ltd", "co", "company",
+    "united", "states", "america",
+})
+
+
+def _is_name_mismatch(claimed: str, actual: str) -> bool:
+    """Return True if claimed case name significantly differs from actual (Jaccard < 0.3)."""
+    import re as _re
+    if not claimed or not actual:
+        return False
+
+    def _words(s: str) -> set:
+        return {
+            w for w in _re.sub(r"[^\w\s]", " ", s.lower()).split()
+            if w not in _NAME_STOP and len(w) > 1
+        }
+
+    a, b = _words(claimed), _words(actual)
+    if not a or not b:
+        return False
+    return len(a & b) / len(a | b) < 0.3
+
+
 def _enrich_citation_result(r: dict[str, Any]) -> dict[str, Any]:
     """Add courtlistener_url / search_url to a raw citation-lookup result."""
     status = r.get("status")
@@ -304,6 +329,23 @@ async def validate_citations(
     await ctx.info(
         f"Validating citations from {text_len:,} chars of text..."
     )
+
+    # Capture claimed case names via local eyecite before API call (fast, no network)
+    claimed_names: dict[str, str] = {}
+    try:
+        eyecite_data = await asyncio.to_thread(_extract_citations_sync, text)
+        for cc in eyecite_data.get("case_citations", []):
+            vol = cc.get("volume", "")
+            rep = cc.get("reporter", "")
+            page = cc.get("page", "")
+            if vol and rep and page:
+                key = f"{vol.strip()} {rep.strip()} {page.strip()}"
+                name = " v. ".join(filter(None, [cc.get("plaintiff", ""), cc.get("defendant", "")]))
+                if name:
+                    claimed_names[key] = name
+    except Exception:
+        pass  # Name extraction failure doesn't block citation validation
+
     results = await client.validate_citations(text)
 
     if not results:
@@ -320,10 +362,24 @@ async def validate_citations(
     # Enrich each result with courtlistener_url (200/300) or search_url (404)
     enriched = [_enrich_citation_result(r) for r in results]
 
+    # Detect name mismatches: status 200 but claimed case name != resolved case name
+    name_mismatch_count = 0
+    for r in enriched:
+        if r.get("status") == 200 and r.get("clusters"):
+            citation_key = r.get("citation", "")
+            actual_name = r["clusters"][0].get("case_name", "")
+            claimed = claimed_names.get(citation_key, "")
+            if claimed and actual_name and _is_name_mismatch(claimed, actual_name):
+                r["name_mismatch"] = True
+                r["claimed_case_name"] = claimed
+                r["actual_case_name"] = actual_name
+                name_mismatch_count += 1
+
     output: dict[str, Any] = {
         "total_citations": len(enriched),
         "valid": valid_count,
         "ambiguous": ambiguous_count,
+        "name_mismatch": name_mismatch_count,
         "invalid_reporter": sum(1 for r in enriched if r.get("status") == 400),
         "not_found": not_found_count,
         "overflow": sum(1 for r in enriched if r.get("status") == 429),
@@ -332,6 +388,12 @@ async def validate_citations(
 
     # Build workflow guidance based on results
     next_steps = []
+    if name_mismatch_count > 0:
+        next_steps.append(
+            f"NAME MISMATCH ({name_mismatch_count}): citation(s) with status=200 resolved to a DIFFERENT "
+            "case than claimed in the brief — HIGH hallucination risk. Check claimed_case_name vs "
+            "actual_case_name in each flagged result and flag as suspect."
+        )
     if valid_count > 0:
         next_steps.append(
             "200: courtlistener_url is already in the result — use it as 🔗 link. "
