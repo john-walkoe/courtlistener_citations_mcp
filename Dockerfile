@@ -17,14 +17,11 @@ RUN pip install --no-cache-dir . && \
 
 USER mcpuser
 
-# Default to HTTP transport in Docker
-ENV TRANSPORT=http HOST=0.0.0.0 PORT=8000 LOG_LEVEL=INFO
+ENV LOG_LEVEL=INFO
 
+# Port 8000 used when running in HTTP mode (TRANSPORT=http)
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import httpx; r = httpx.get('http://localhost:8000/health'); r.raise_for_status()" || exit 1
-
-# Run with uvicorn for production
-CMD ["uvicorn", "courtlistener_mcp.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Default: STDIO transport (for Docker MCP Gateway / MCP Toolkit)
+# HTTP mode: docker run -e TRANSPORT=http -e PORT=8000 -p 8000:8000 <image>
+CMD ["courtlistener-mcp"]
