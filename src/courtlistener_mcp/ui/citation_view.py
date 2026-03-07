@@ -487,6 +487,7 @@ function renderValidation(parsed) {
     const citText = cit.citation || cit.normalized_citations?.[0] || 'Unknown citation';
     const statusLabel = STATUS_LABELS[status] || 'Unknown';
     const links = buildClusterLinks(cit.clusters);
+    const searchUrl = (status === 404 && cit.search_url && isValidHttpUrl(cit.search_url)) ? cit.search_url : null;
 
     html += '<div class="citation-card status-' + status + '">';
     html += '<div class="status-dot"></div>';
@@ -494,6 +495,7 @@ function renderValidation(parsed) {
     html += '<div class="citation-text">' + escapeHtml(citText) + '</div>';
     html += '<div class="citation-meta"><span class="status-label">' + statusLabel + '</span></div>';
     if (links) html += '<div class="citation-links">' + links + '</div>';
+    if (searchUrl) html += '<div class="citation-links"><button data-url="' + escapeHtml(searchUrl) + '">Search CourtListener &rarr;</button></div>';
     html += '</div></div>';
   }
   html += '</div>';
