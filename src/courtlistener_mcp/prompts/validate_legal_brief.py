@@ -11,7 +11,8 @@ from . import mcp
         "on every citation in the document, generates CourtListener citations verification links, "
         "and produces a structured report with ✅/⚠️/❌ status and risk assessment. "
         "Requires CourtListener citations MCP. "
-        "Parameters: document_text* (required), court_focus (e.g. 'cafc', 'scotus'), "
+        "Parameters: document_text (paste text OR leave blank and attach a file), "
+        "court_focus (e.g. 'cafc', 'scotus'), "
         "analysis_depth ('standard' or 'comprehensive')."
     ),
 )
@@ -23,8 +24,10 @@ async def validate_legal_brief_prompt(
     """
     Citation hallucination audit for a legal document.
 
-    Required:
-    - document_text: Full text of the legal brief/motion/memo to validate
+    Optional (provide one of):
+    - document_text: Paste the full text of the brief/motion/memo here, OR
+      leave blank and attach the document file (PDF, Word, txt) to the conversation —
+      Claude will read the attachment automatically.
 
     Optional:
     - court_focus: Primary court identifier for fallback searches (e.g. 'scotus', 'cafc',
@@ -36,6 +39,16 @@ async def validate_legal_brief_prompt(
     Returns a complete step-by-step execution plan with tool calls, output format,
     and risk assessment instructions.
     """
+    doc_source = (
+        f"**Document source:** Pasted text ({len(document_text):,} chars)"
+        if document_text.strip()
+        else (
+            "**Document source:** No text pasted — read the attached file(s) in this conversation "
+            "(PDF, Word, or text). Extract the full text and use it as `document_text` for all tool calls below. "
+            "If no attachment is present, ask the user to either paste the document text or attach the file."
+        )
+    )
+
     court_hint = (
         f"\nPrimary court focus: {court_focus} — use as default `court` param in courtlistener_search_cases fallbacks."
         if court_focus
@@ -70,7 +83,7 @@ Hallucination patterns to watch for in comprehensive mode:
 
     return f"""# Citation Validation Audit — Legal Brief
 
-**Document length:** {len(document_text):,} chars
+{doc_source}
 **Court focus:** {court_focus or "infer from reporter"}
 **Analysis depth:** {analysis_depth}
 {court_hint}
@@ -78,6 +91,8 @@ Hallucination patterns to watch for in comprehensive mode:
 ---
 
 ## STEP 0: Full Citation Inventory (Local — no API, run first)
+
+{"Read the attached file first and extract its full text. Use that text as `document_text` for all steps below." if not document_text.strip() else ""}
 
 Call courtlistener_extract_citations to discover ALL citation types before hitting the API:
 

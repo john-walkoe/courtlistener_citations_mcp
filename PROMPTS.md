@@ -57,9 +57,11 @@ The prompt template is an AI-optimized execution plan designed for legal profess
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `document_text` | **Yes** | — | Full text of the legal brief, motion, or memo |
+| `document_text` | No | (blank) | Paste the full text of the brief, motion, or memo — **or leave blank and attach the document file** (PDF, Word, txt). Claude will read the attachment automatically. |
 | `court_focus` | No | (inferred) | Primary court identifier — e.g., `scotus`, `cafc`, `ca9`. Speeds up fallback searches when known. |
 | `analysis_depth` | No | `comprehensive` | `standard` (validate + link only) or `comprehensive` (also check mismatches, party name confusions, zero-citation signals) |
+
+> **Tip:** To use a file attachment instead of pasting text — leave `document_text` blank, attach your PDF or Word document to the conversation before clicking Execute, and Claude will read the file and run the full audit on it.
 
 **Use Cases**:
 - Pre-filing citation audit for AI-drafted briefs
