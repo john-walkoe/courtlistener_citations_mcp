@@ -25,7 +25,6 @@ from .config.log_config import setup_logging
 from .config.settings import get_settings
 from .config.tool_guidance import SERVER_INSTRUCTIONS, get_guidance_section
 from .shared.safe_logger import get_safe_logger
-from .ui.citation_view import CITATION_VIEW_HTML
 
 setup_logging(log_level=os.getenv("LOG_LEVEL", "INFO"))
 logger = get_safe_logger(__name__)
@@ -43,23 +42,6 @@ mcp = FastMCP(
 # Register prompt templates
 from .prompts import register_prompts  # noqa: E402
 register_prompts(mcp)
-
-# =============================================================================
-# MCP APPS - UI RESOURCE
-# =============================================================================
-
-CITATION_VIEW_URI = "ui://courtlistener-mcp/citation-results.html"
-
-
-@mcp.resource(
-    CITATION_VIEW_URI,
-    mime_type="text/html;profile=mcp-app",
-    meta={"ui": {"csp": {"resourceDomains": ["https://unpkg.com"]}}},
-)
-def citation_view_resource() -> str:
-    """Interactive citation validation results view (MCP Apps)."""
-    return CITATION_VIEW_HTML
-
 
 # Lazy-initialized client
 _client: Optional[CourtListenerClient] = None
@@ -189,6 +171,38 @@ def _build_courtlistener_url(cluster_id: int, case_name: str = "") -> str:
     return OPINION_URL_TEMPLATE.format(cluster_id=cluster_id, slug=slug)
 
 
+def _enrich_citation_result(r: dict[str, Any]) -> dict[str, Any]:
+    """Add courtlistener_url / search_url to a raw citation-lookup result."""
+    status = r.get("status")
+    clusters = r.get("clusters", [])
+    if status == 200 and clusters:
+        c = clusters[0]
+        cluster_id = c.get("id", "")
+        case_name = c.get("case_name", "")
+        r["courtlistener_url"] = (
+            f"https://www.courtlistener.com{c['absolute_url']}"
+            if c.get("absolute_url")
+            else _build_courtlistener_url(cluster_id, case_name)
+        )
+        r["cluster_id"] = cluster_id
+    elif status == 300 and clusters:
+        # Ambiguous — attach URLs for all candidates
+        for c in clusters:
+            cluster_id = c.get("id", "")
+            c["courtlistener_url"] = (
+                f"https://www.courtlistener.com{c['absolute_url']}"
+                if c.get("absolute_url")
+                else _build_courtlistener_url(cluster_id, c.get("case_name", ""))
+            )
+    elif status == 404:
+        # Construct a CourtListener search URL for manual verification
+        citation_str = r.get("citation", "")
+        import urllib.parse
+        query = urllib.parse.quote_plus(citation_str)
+        r["search_url"] = f"https://www.courtlistener.com/?q={query}&type=o"
+    return r
+
+
 def _extract_case_summary(result: dict[str, Any]) -> dict[str, Any]:
     """Extract a concise case summary from a search result."""
     cluster_id = result.get("cluster_id", "")
@@ -220,10 +234,6 @@ def _extract_case_summary(result: dict[str, Any]) -> dict[str, Any]:
         "readOnlyHint": True,
         "openWorldHint": True,
     },
-    meta={
-        "ui": {"resourceUri": CITATION_VIEW_URI},
-        "ui/resourceUri": CITATION_VIEW_URI,  # legacy support
-    },
 )
 @_handle_client_errors
 async def validate_citations(
@@ -247,9 +257,12 @@ async def validate_citations(
     - 404: Citation NOT found (potential hallucination)
     - 429: Overflow (>250 citations in request, not looked up)
 
-    IMPORTANT - URL workflow: Results include cluster IDs but NOT clickable
-    CourtListener URLs. You MUST call courtlistener_get_cluster(cluster_id) for each
-    verified citation to obtain the courtlistener_url for your response.
+    IMPORTANT - URLs are pre-built in results:
+    - status 200/300: courtlistener_url is directly in each cluster object — use it as 🔗 link
+    - status 404: search_url is pre-built for manual lookup — present it as 🔗 link
+    - NEVER use web search to verify citations — CourtListener is the sole authoritative source
+    - A 404 result means SUSPECT regardless of what external sources say — present it as ⚠️ SUSPECT
+    - DO NOT override a 404 result with information from Wikipedia, Westlaw, or any web source
 
     RATE LIMIT STRATEGY — the throttle is 60 *valid* citations per minute
     (not 60 requests). A document with 60 real citations consumes the entire
@@ -285,29 +298,34 @@ async def validate_citations(
     not_found_count = sum(1 for r in results if r.get("status") == 404)
     ambiguous_count = sum(1 for r in results if r.get("status") == 300)
 
+    # Enrich each result with courtlistener_url (200/300) or search_url (404)
+    enriched = [_enrich_citation_result(r) for r in results]
+
     output: dict[str, Any] = {
-        "total_citations": len(results),
+        "total_citations": len(enriched),
         "valid": valid_count,
         "ambiguous": ambiguous_count,
-        "invalid_reporter": sum(1 for r in results if r.get("status") == 400),
+        "invalid_reporter": sum(1 for r in enriched if r.get("status") == 400),
         "not_found": not_found_count,
-        "overflow": sum(1 for r in results if r.get("status") == 429),
-        "citations": results,
+        "overflow": sum(1 for r in enriched if r.get("status") == 429),
+        "citations": enriched,
     }
 
     # Build workflow guidance based on results
     next_steps = []
     if valid_count > 0:
         next_steps.append(
-            "200: check case_name for MISMATCH. MUST call courtlistener_get_cluster(cluster_id) for courtlistener_url"
+            "200: courtlistener_url is already in the result — use it as 🔗 link. "
+            "Check case_name matches the document (MISMATCH = suspect citation)."
         )
     if not_found_count > 0:
         next_steps.append(
-            f"404 ({not_found_count}): courtlistener_search_cases(case_name=..., court=...) as fallback"
+            f"404 ({not_found_count}): use courtlistener_search_cases(case_name=..., court=...) as fallback. "
+            "search_url is pre-built in each 404 result for manual lookup if all tools fail."
         )
     if ambiguous_count > 0:
         next_steps.append(
-            "300: review clusters list to pick best match"
+            "300: courtlistener_url is in each cluster — pick best match, present with 🔗 link."
         )
     if not next_steps:
         next_steps.append("Format results per courtlistener_citations_get_guidance(section='response_format')")

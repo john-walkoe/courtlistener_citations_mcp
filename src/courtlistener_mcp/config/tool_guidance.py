@@ -147,11 +147,18 @@ STEP 3: courtlistener_lookup_citation (LAST RESORT)
   Found? → ⚠️ PARTIAL MATCH (compare case_name for MISMATCH)
   Not found? → ❌ NOT FOUND (likely hallucination)
 
-STEP 4: FORMAT RESULTS
+STEP 4: GET COURTLISTENER LINKS (REQUIRED FOR ALL OUTCOMES)
+  ├─ status 200 → call courtlistener_get_cluster(cluster_id) → use returned courtlistener_url
+  ├─ status 404 found via fallback → cluster result includes courtlistener_url — use it directly
+  ├─ status 404 NOT FOUND (hallucination) → construct search URL:
+  │     https://www.courtlistener.com/?q={case+name+url+encoded}&type=o
+  └─ Every citation in the response MUST have a 🔗 link — even hallucinations get a search link
+
+STEP 5: FORMAT RESULTS
   ├─ Start with 📊 VALIDATION SUMMARY (counts by category)
-  ├─ ✅ VERIFIED with 🔗 courtlistener_url from results
-  ├─ ⚠️ PARTIAL MATCH / MISMATCH with fallback method noted
-  ├─ ❌ NOT FOUND with all methods tried
+  ├─ ✅ VERIFIED with 🔗 direct case URL from courtlistener_get_cluster
+  ├─ ⚠️ PARTIAL MATCH / MISMATCH with fallback method noted + 🔗 case URL
+  ├─ ❌ NOT FOUND with 🔗 search URL (https://www.courtlistener.com/?q=...&type=o)
   └─ End with 🚨 RISK ASSESSMENT
 
 REPORTER → COURT MAPPING (for inferring court from citation):
@@ -198,10 +205,11 @@ STRUCTURE YOUR RESPONSE IN THESE SECTIONS (in order):
   🔗 [courtlistener_url from result]
   Note: Found via [case name search / reporter citation only]
 
-4. NOT FOUND (all tools failed - NO LINK POSSIBLE):
+4. NOT FOUND (all tools failed - use search link):
   ❌ NOT FOUND: [Citation/Case Name]
   Searched: validate_citations, case name search, reporter lookup
   Status: LIKELY HALLUCINATION
+  🔗 Search CourtListener: https://www.courtlistener.com/?q=[url-encoded+case+name]&type=o
 
 5. MISMATCHED CITATIONS (citation exists but wrong case):
   ⚠️ MISMATCH: [Claimed Case Name]
@@ -397,6 +405,13 @@ CourtListener Citation Validation MCP provides 6 tools for extracting and
 validating legal citations in documents against the CourtListener database.
 
 PRIMARY USE CASE: Detect AI-generated hallucinated citations in legal briefs.
+
+CRITICAL RULES — ALWAYS FOLLOW:
+- NEVER use web search to verify or override citation results
+- CourtListener is the SOLE authoritative source for citation validation
+- status 404 = ⚠️ SUSPECT — do not override with Wikipedia, Westlaw, or any external source
+- status 200 = ✅ VERIFIED — courtlistener_url is in the clusters[0] object, use it directly
+- status 404 = ⚠️ SUSPECT — search_url is pre-built in the result, present it as 🔗 link
 
 ALWAYS-AVAILABLE TOOLS (non-deferred, immediate access):
 1. courtlistener_extract_citations - Local citation extraction (all types, no API key needed)
