@@ -7,6 +7,16 @@ A Model Context Protocol (MCP) server for validating legal citations against the
 [![API](https://img.shields.io/badge/API-CourtListener%20REST%20v4-green.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+## 📚 Documentation
+
+| Document | Description |
+|----------|-------------|
+| **[📥 Installation Guide](INSTALL.md)** | Complete cross-platform setup with automated scripts |
+| **[📖 Usage Examples](USAGE_EXAMPLES.md)** | Workflows, fallback chain examples, and cross-MCP integration patterns |
+| **[🎯 Prompt Templates](PROMPTS.md)** | Ready-to-use prompt templates for brief audits, hallucination triage, and pre-filing checklists |
+| **[🛡️ Security Scanning](SECURITY_SCANNING.md)** | Automated secret detection and prompt injection protection guide |
+| **[⚖️ License](LICENSE)** | MIT License terms and conditions |
+
 ## Demo
 
 Citation validation of *Mata v. Avianca*.  The MCP detects which citations are real, which are fabricated, and which resolve to the wrong case entirely.
