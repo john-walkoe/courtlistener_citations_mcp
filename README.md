@@ -9,7 +9,48 @@ A Model Context Protocol (MCP) server for validating legal citations against the
 
 ## Quick Start
 
-### Windows Install
+### Docker (Recommended)
+
+Docker is the recommended installation method. It includes the **interactive MCP App panel** — color-coded citation cards with clickable CourtListener links rendered inline in Claude Desktop.
+
+**Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine)
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/john-walkoe/courtlistener_citations_mcp.git
+cd courtlistener_citations_mcp
+
+# 2. Create a .env file with your CourtListener API token
+#    (free token at https://www.courtlistener.com/sign-in/)
+echo COURTLISTENER_API_TOKEN=your_40_char_hex_token_here > .env
+
+# 3. Start the server
+docker compose up -d
+
+# Verify it's running
+curl http://localhost:8000/health
+```
+
+**Claude Desktop config** (`%APPDATA%\Claude\claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "courtlistener_citations": {
+      "command": "npx",
+      "args": ["mcp-remote", "http://localhost:8000/mcp"]
+    }
+  }
+}
+```
+
+> The `.env` file is gitignored. Never commit it. See `.env.example` for reference.
+
+---
+
+### Windows STDIO Install
+
+> **Note:** STDIO mode works fully for citation validation. However, the **interactive MCP App panel does not currently render in Claude Desktop via STDIO** — you will get text results only. Use Docker mode above for the full visual panel experience. DPAPI/Credential Manager secure storage is Windows STDIO only.
 
 **Run PowerShell as Administrator**, then:
 
@@ -47,7 +88,7 @@ The PowerShell script will:
 
 ### Claude Desktop Configuration - Manual Install
 
-**STDIO mode (recommended):**
+**STDIO mode** (no MCP App panel in Claude Desktop — text results only):
 
 ```json
 {
@@ -111,7 +152,7 @@ Add to `.claude.json` in your project root or `~/.claude.json` globally:
 - **Local Citation Extraction** - [eyecite](https://github.com/freelawproject/eyecite) library inventories all citation types (case, statute, law journal, id., supra) locally before any API call — no API key, no rate limits, instant
 - **Citation Validation** - 7-tool workflow detects hallucinated citations: local discovery first, then 3-tool fallback chain against CourtListener API
 - **Dual Transport** - STDIO (Claude Desktop/Code) and Streamable HTTP (Docker, CoPilot Studio, remote clients)
-- **MCP Apps UI** - Interactive citation validation results view (supported in Claude.ai, Claude Desktop, VS Code Insiders)
+- **MCP Apps UI** - Interactive citation validation results panel with color-coded cards and CourtListener links. **Requires Docker/HTTP mode** (`npx mcp-remote`). STDIO mode in Claude Desktop does not currently render the panel (text results still work).
 - **Secure API Key Storage** - Windows DPAPI encryption for API tokens (no plain text in config files)
 - **Elicitation Support** - Prompts for API token at runtime if not configured (FastMCP 3.0)
 - **Tool Search Optimization** - Server instructions guide Claude to efficiently discover tools on-demand
@@ -194,10 +235,14 @@ Use `courtlistener_citations_get_guidance(section)` with these sections:
 
 ## Transport Modes
 
-| Mode | Use Case | Configuration |
-|------|----------|---------------|
-| **STDIO** | Claude Desktop, Claude Code | Default (no config needed) |
-| **HTTP** | CoPilot Studio, Docker, web clients | `TRANSPORT=http` env var |
+| Mode | Use Case | MCP App Panel | Secure Token Storage | Configuration |
+|------|----------|--------------|---------------------|---------------|
+| **HTTP (Docker)** | Claude Desktop, CoPilot Studio, web clients | ✅ Full panel | `.env` file | `TRANSPORT=http` via docker-compose |
+| **STDIO** | Claude Desktop, Claude Code | ❌ Not rendered (text only) | Windows Credential Manager + DPAPI (Windows only) | Default |
+
+> **MCP App panel** renders interactive color-coded citation cards inline in Claude Desktop when using HTTP/Docker mode via `npx mcp-remote`. STDIO mode negotiates the capability but Claude Desktop does not yet render panels for STDIO transport.
+
+> **DPAPI / Windows Credential Manager** secure storage is only available in STDIO mode on Windows. Docker containers run Linux and cannot access Windows Credential Manager — use a `.env` file instead.
 
 ### Running in HTTP Mode
 
@@ -408,10 +453,12 @@ In short: slightly longer time before the first tool call → much shorter total
 
 ### Token Resolution Priority
 
-1. `COURTLISTENER_API_TOKEN` environment variable
-2. **Windows Credential Manager** (via `keyring` library) — PRIMARY secure storage on Windows
-3. DPAPI-encrypted file (`~/.courtlistener_api_token`) — fallback on Windows (auto-migrated to Credential Manager on first access)
-4. Elicitation prompt (asks user at tool call time via FastMCP)
+1. `COURTLISTENER_API_TOKEN` environment variable ← **Docker / all platforms**
+2. **Windows Credential Manager** (via `keyring` library) ← **Windows STDIO only**
+3. DPAPI-encrypted file (`~/.courtlistener_api_token`) ← **Windows STDIO fallback** (auto-migrated to Credential Manager on first access)
+4. Elicitation prompt (asks user at tool call time via FastMCP) ← STDIO only
+
+> **Docker users:** Only option 1 applies. Set `COURTLISTENER_API_TOKEN` in your `.env` file. Options 2–4 require a native Windows process and are not available inside a Linux container.
 
 ### PowerShell Management
 
@@ -467,7 +514,7 @@ This MCP is designed to complement other legal research MCP servers:
 courtlistener_citations_mcp/
 ├── pyproject.toml                     # FastMCP 3.0 beta 2, httpx, pydantic-settings
 ├── .env.example                       # Template for env vars
-├── Dockerfile                         # Python 3.11-slim, uvicorn
+├── Dockerfile                         # Python 3.11-slim, STDIO default (HTTP via TRANSPORT=http)
 ├── docker-compose.yml                 # Single service, port 8000
 ├── CLAUDE.md                          # Claude Code guidance
 ├── README.md                          # This file
