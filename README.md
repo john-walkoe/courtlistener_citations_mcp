@@ -11,7 +11,7 @@ A Model Context Protocol (MCP) server for validating legal citations against the
 
 Citation validation of *Mata v. Avianca*.  The MCP detects which citations are real, which are fabricated, and which resolve to the wrong case entirely.
 
-![CourtListener Citation Validation MCP Demo](documentation_photos/courtlistener_citations_mcp.mp4)
+https://github.com/user-attachments/assets/d1ba1b95-4bfe-4749-8ae7-a1255946e949
 
 ## Quick Start
 
