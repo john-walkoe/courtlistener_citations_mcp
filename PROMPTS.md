@@ -474,16 +474,20 @@ Status codes:
 
 | Section | Content |
 |---------|---------|
-| `overview` | What this MCP does, when to use it |
-| `citation_workflow` | The 3-tool fallback chain explained |
-| `tools` | Reference for all 7 tools |
-| `fallback_chain` | Detailed fallback logic with search optimization |
+| `overview` | What this MCP does, when to use it, tool reference |
+| `workflow` | Full discovery + 3-tool fallback chain explained |
+| `response_format` | How to format results with ✅/⚠️/❌ symbols |
+| `hallucination_patterns` | Common AI hallucination detection patterns |
+| `edge_cases` | SCOTUS parallel citations, state courts, unpublished opinions |
 | `risk_assessment` | How to interpret ✅/⚠️/❌ and risk levels |
 | `limitations` | CourtListener coverage gaps and false negatives |
 
 **Templates:**
 ```
 Use courtlistener_get_guidance with section="overview"
+```
+```
+Use courtlistener_get_guidance with section="workflow"
 ```
 ```
 Use courtlistener_get_guidance with section="risk_assessment"

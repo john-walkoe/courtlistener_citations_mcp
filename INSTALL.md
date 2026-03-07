@@ -36,7 +36,7 @@ Step-by-step setup for the CourtListener Citation Validation MCP on Windows and 
 
 1. Clone or download the repository:
    ```powershell
-   git clone https://github.com/your-org/courtlistener_citations_mcp.git
+   git clone https://github.com/john-walkoe/courtlistener_citations_mcp.git
    cd courtlistener_citations_mcp
    ```
 
@@ -64,7 +64,7 @@ Step-by-step setup for the CourtListener Citation Validation MCP on Windows and 
 
 1. Clone or download the repository:
    ```bash
-   git clone https://github.com/your-org/courtlistener_citations_mcp.git
+   git clone https://github.com/john-walkoe/courtlistener_citations_mcp.git
    cd courtlistener_citations_mcp
    ```
 
@@ -120,9 +120,26 @@ The token is **never stored in the MCP config file** — it is loaded at runtime
 
 ## Claude Desktop / Claude Code Configuration
 
-### STDIO Mode (Recommended)
+### Docker / HTTP Mode (Recommended for Full Feature Set)
 
-STDIO is the default and is used by Claude Desktop and Claude Code directly.
+Docker is the recommended installation method. It enables the **interactive MCP App panel** — color-coded citation cards with clickable CourtListener links rendered inline in Claude Desktop.
+
+See [Docker / HTTP Mode](#docker--http-mode) below, then add this to your Claude config:
+
+```json
+{
+  "mcpServers": {
+    "courtlistener_citations": {
+      "command": "npx",
+      "args": ["mcp-remote", "http://localhost:8000/mcp"]
+    }
+  }
+}
+```
+
+### STDIO Mode (Text Results Only)
+
+> **Note:** STDIO mode works for all citation validation tools. However, the **interactive MCP App panel does not render in Claude Desktop via STDIO** — you will get text results only. DPAPI/Windows Credential Manager secure token storage is STDIO-only (Windows). Use Docker mode above for the full visual panel experience.
 
 Add to your Claude config (`~/.claude.json` for Claude Code, or `~/.config/Claude/claude_desktop_config.json` for Claude Desktop):
 
@@ -343,6 +360,8 @@ http://localhost:8000/mcp
 > 📷 `documentation_photos/install_docker_running.png`
 
 ### Dev Tunnel (Windows — for remote access)
+
+> ⚠️ **Corporate & Regulatory Policy Notice:** Dev tunnels create a publicly accessible endpoint for your local server. Before using this feature, consult your organization's IT security policy and bar association ethics rules regarding client data confidentiality. Many law firms prohibit this type of network bypass on managed devices. **Do not use on corporate/managed hardware without IT approval.** For production use, deploy behind a properly secured reverse proxy instead.
 
 To expose the local HTTP server via a dev tunnel:
 

@@ -428,7 +428,7 @@ Expected: first verified ✅, second not found ❌.
 
 ```
 Use courtlistener_get_guidance with section="overview" to learn what this MCP does.
-Use courtlistener_get_guidance with section="citation_workflow" to understand the fallback chain.
+Use courtlistener_get_guidance with section="workflow" to understand the fallback chain.
 Use courtlistener_get_guidance with section="risk_assessment" to understand risk levels.
 Use courtlistener_get_guidance with section="limitations" to understand coverage gaps.
 ```

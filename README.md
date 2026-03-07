@@ -7,6 +7,12 @@ A Model Context Protocol (MCP) server for validating legal citations against the
 [![API](https://img.shields.io/badge/API-CourtListener%20REST%20v4-green.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+## Demo
+
+Citation validation of *Mata v. Avianca*.  The MCP detects which citations are real, which are fabricated, and which resolve to the wrong case entirely.
+
+![CourtListener Citation Validation MCP Demo](documentation_photos/courtlistener_citations_mcp.mp4)
+
 ## Quick Start
 
 ### Docker (Recommended)
@@ -273,6 +279,17 @@ COURTLISTENER_API_TOKEN=your_40_char_hex_token_here
 > **Note:** The `.env` file is gitignored. Never commit it. The `.env.example` template is provided for reference.
 
 ### Dev Tunnel for CoPilot Studio / Claude.ai
+
+> ⚠️ **Corporate & Regulatory Policy Notice**
+>
+> Dev tunnels create a **publicly accessible endpoint** for your local server. Before using this feature, you **must**:
+>
+> - **Consult your organization's IT security policy.** Many law firms, corporations, and government entities prohibit or restrict the use of development tunnels, reverse proxies, and other tools that bypass network perimeter controls on managed devices or corporate networks.
+> - **Check your bar association's ethics rules.** Attorney obligations regarding client data confidentiality (Model Rules 1.6, 1.15) may impose additional constraints on transmitting client documents through third-party relay infrastructure.
+> - **Do not use this feature on managed/corporate hardware** without explicit written approval from your IT/security team.
+> - **Do not use this feature for production deployments.** Dev tunnels are intended for development and testing only. For production external access, use a properly secured reverse proxy (e.g., nginx with TLS) or a cloud-hosted deployment.
+>
+> If in doubt, ask your IT department first.
 
 For external access (CoPilot Studio, Claude.ai), use the dev tunnel launcher script. It starts the HTTP server locally and creates a [Microsoft Dev Tunnel](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/) to expose it publicly.
 
