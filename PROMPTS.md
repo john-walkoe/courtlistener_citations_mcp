@@ -10,25 +10,19 @@ This document details the prompt template included with the CourtListener Citati
 
 1. **In Claude Desktop**: Press the `+` button
 
-   > 📷 `documentation_photos/Prompts-Step1.jpg`
+   > ![Step 1 - Select prompt template](documentation_photos/Prompts-Step1.jpg)
 
-2. **Select "Add from courtlistener_citations"** from the dropdown menu
+2. **Select "Add from courtlistener_citations"** from the dropdown menu and select `validate_legal_brief`
 
-   > 📷 `documentation_photos/Prompts-Step2.jpg`
+   > ![Step 2 - Select validate_legal_brief from courtlistener_citations](documentation_photos/Prompts-Step2.jpg)
 
-3. **Select `validate_legal_brief`** from the dropdown
+4. **Fill in the parameters** — paste your document text (or Leave Blank and attach the document at next step), optionally set court focus and analysis depth.  Hit the "Add prompt" button.
 
-   > 📷 `documentation_photos/Prompts-Step3.jpg`
+   > ![Step 3 - Fill in parameters](documentation_photos/Prompts-Step3.jpg)
 
-4. **Fill in the parameters** — paste your document text, optionally set court focus and analysis depth
+5. **Click Execute** — For best results type "Perform Prompt" and start the chat.  (If you left Blank the "Document_text" field in step #3 then be sure to attach you document at this step, like in the example) Claude will run the complete workflow
 
-   > 📷 `documentation_photos/Prompts-Step4.jpg`
-
-5. **Click Execute** — Claude automatically runs the complete 4-step validation workflow
-
-   > 📷 `documentation_photos/Prompts-Step5.jpg`
-
-> **Note:** The prompt template requires Docker/HTTP mode (`npx mcp-remote http://localhost:8000/mcp`). STDIO mode supports the tools directly but the `+` prompt button may not surface the template in all Claude Desktop versions.
+   > ![Step 4 - Execute workflow](documentation_photos/Prompts-Step4.jpg)
 
 ---
 

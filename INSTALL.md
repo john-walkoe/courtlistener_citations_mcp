@@ -52,12 +52,6 @@ Step-by-step setup for the CourtListener Citation Validation MCP on Windows and 
    - Ask about transport mode (STDIO or HTTP)
    - Optionally configure Claude Desktop or Claude Code
 
-**Screenshot — Windows Setup Script Running:**
-> 📷 `documentation_photos/install_windows_setup_running.png`
-
-**Screenshot — Windows Setup Complete:**
-> 📷 `documentation_photos/install_windows_setup_complete.png`
-
 ---
 
 ## Quick Start — Linux / macOS
@@ -81,12 +75,6 @@ Step-by-step setup for the CourtListener Citation Validation MCP on Windows and 
    - Ask about transport mode (STDIO or HTTP)
    - Optionally configure Claude Desktop or Claude Code
 
-**Screenshot — Linux Setup Script Running:**
-> 📷 `documentation_photos/install_linux_setup_running.png`
-
-**Screenshot — Linux Setup Complete:**
-> 📷 `documentation_photos/install_linux_setup_complete.png`
-
 ---
 
 ## API Token
@@ -94,17 +82,21 @@ Step-by-step setup for the CourtListener Citation Validation MCP on Windows and 
 ### Getting Your Token
 
 1. Sign up or log in at [https://www.courtlistener.com/sign-in/](https://www.courtlistener.com/sign-in/)
-2. Navigate to your profile → API Token
-3. Copy the 40-character hex token (e.g., `a1b2c3d4e5f6...`)
+2. Navigate to your profile → Account
+3. Select "Developer Tools"
+4. Select "Your API Token"
+5. Copy the 40-character hex token (e.g., `a1b2c3d4e5f6...`)
 
 **Token format:** Exactly 40 characters, lowercase hex only (`a-f`, `0-9`).
 
 **Screenshot — CourtListener API Token Page:**
-> 📷 `documentation_photos/install_courtlistener_token_page.png`
+
+![CourtListener API Token](documentation_photos\install_courtlistener_token_page.jpg)
 
 ### Token Storage
 
 **Windows (preferred):**
+
 - Primary: Windows Credential Manager (`CourtListener MCP:API_TOKEN`)
 - Fallback: DPAPI-encrypted file at `~/.courtlistener_api_token`
 
@@ -206,9 +198,6 @@ claude mcp list
 
 Should show `courtlistener_citations` in the list.
 
-**Screenshot — MCP Server Listed in Claude Code:**
-> 📷 `documentation_photos/install_mcp_listed.png`
-
 ---
 
 ## Verify Installation
@@ -245,9 +234,6 @@ Use courtlistener_extract_citations on: Alice Corp. v. CLS Bank Int'l, 573 U.S. 
 
 Expected: 1 case citation extracted, no API call required.
 
-**Screenshot — Successful Validation Test:**
-> 📷 `documentation_photos/install_verification_test.png`
-
 ---
 
 ## Manage API Keys (Windows)
@@ -257,9 +243,6 @@ The `manage_api_keys.ps1` script provides a menu to manage all API keys.
 ```powershell
 .\deploy\manage_api_keys.ps1
 ```
-
-**Screenshot — Manage API Keys Menu:**
-> 📷 `documentation_photos/install_manage_api_keys_menu.png`
 
 **Menu options:**
 
@@ -356,9 +339,6 @@ http://localhost:8000/mcp
 | `PORT` | No | `8000` | HTTP server port |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
 
-**Screenshot — Docker Running:**
-> 📷 `documentation_photos/install_docker_running.png`
-
 ### Dev Tunnel (Windows — for remote access)
 
 > ⚠️ **Corporate & Regulatory Policy Notice:** Dev tunnels create a publicly accessible endpoint for your local server. Before using this feature, consult your organization's IT security policy and bar association ethics rules regarding client data confidentiality. Many law firms prohibit this type of network bypass on managed devices. **Do not use on corporate/managed hardware without IT approval.** For production use, deploy behind a properly secured reverse proxy instead.
@@ -372,26 +352,6 @@ To expose the local HTTP server via a dev tunnel:
 ```powershell
 .\deploy\cleanup_devtunnels.ps1
 ```
-
----
-
-## n8n Integration
-
-The CourtListener MCP can be called from n8n workflows via the HTTP transport mode.
-
-### Setup
-
-1. Start the MCP server in HTTP mode (see [Docker section](#docker--http-mode))
-2. In n8n, add an HTTP Request node:
-   - **Method:** POST
-   - **URL:** `http://localhost:8000/mcp`
-   - **Headers:** `Content-Type: application/json`
-3. Use the MCP JSON-RPC format for tool calls
-
-**Screenshot — n8n Workflow with CourtListener MCP:**
-> 📷 `documentation_photos/install_n8n_workflow.png`
-
-**Example n8n use case:** Automatically validate citations in documents uploaded to a folder, then send a Slack/email alert if any hallucinations are detected.
 
 ---
 

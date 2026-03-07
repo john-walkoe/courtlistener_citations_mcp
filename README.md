@@ -390,17 +390,8 @@ If you run Pi-hole or similar DNS blocking, add these to your allowlist:
 - `(\.|^)microsoftonline\.com$`
 - `(\.|^)live\.com$`
 
-**3. pfBlockerNG (pfSense)**
-The devtunnel relay uses Microsoft Azure US West IPs (`20.125.0.0/16`). If pfBlockerNG is blocking outbound traffic, add `20.125.0.0/16` to your **Firewall > pfBlockerNG > IP > IPv4 Whitelist_Only_Outbound** list and click **Update**.
-
-**4. Snort / Suricata IPS**
-If Snort or Suricata is in blocking mode, the relay IP may get added to the `snort2c` block table after the first failed connection attempt. Two fixes required:
-- Add the relay subnet to your Snort **Pass List** (prevents future blocks)
-- Flush the existing block table entry — from pfSense **Diagnostics > Command Prompt**:
-  ```bash
-  pfctl -t snort2c -T flush
-  ```
-  Note: stopping Snort does NOT flush the pf table — you must flush manually.
+**3. Allow Outbound to Microsoft**
+The devtunnel relay uses Microsoft Azure US West IPs (`20.125.0.0/16`). If a firewall is blocking outbound traffic, add `20.125.0.0/16` to your **Firewall's allow outbound** list and **Update**.
 
 **5. Test connectivity before running the script**
 ```powershell
