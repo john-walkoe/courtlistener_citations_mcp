@@ -15,6 +15,7 @@ CITATION_VIEW_HTML = """<!DOCTYPE html>
 <title>Citation Validation Results</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root { color-scheme: light; }
 
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

@@ -15,6 +15,7 @@ from typing import Annotated, Any, Optional
 import httpx
 from fastmcp import FastMCP, Context
 from fastmcp.exceptions import ToolError
+from fastmcp.server.apps import AppConfig, ResourceCSP
 from pydantic import Field
 from starlette.responses import JSONResponse
 
@@ -49,13 +50,10 @@ register_prompts(mcp)
 # =============================================================================
 
 CITATION_VIEW_URI = "ui://courtlistener-mcp/citation-results.html"
+_CSP = ResourceCSP(resource_domains=["https://cdn.jsdelivr.net"])
 
 
-@mcp.resource(
-    CITATION_VIEW_URI,
-    mime_type="text/html;profile=mcp-app",
-    meta={"ui": {"csp": {"resourceDomains": ["https://cdn.jsdelivr.net"]}}},
-)
+@mcp.resource(CITATION_VIEW_URI, app=AppConfig(csp=_CSP))
 def citation_view_resource() -> str:
     """Interactive citation validation results view (MCP Apps)."""
     return CITATION_VIEW_HTML
@@ -277,7 +275,7 @@ def _extract_case_summary(result: dict[str, Any]) -> dict[str, Any]:
         "readOnlyHint": True,
         "openWorldHint": True,
     },
-    meta={"ui": {"resourceUri": CITATION_VIEW_URI}},
+    app=AppConfig(resource_uri=CITATION_VIEW_URI),
 )
 @_handle_client_errors
 async def validate_citations(
@@ -1011,9 +1009,17 @@ async def health_check(request):
 from starlette.middleware.cors import CORSMiddleware
 from .shared.http_rate_limit import InboundRateLimitMiddleware
 
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "CORS_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080"
+    ).split(",")
+    if o.strip()
+]
+
 app = CORSMiddleware(
     InboundRateLimitMiddleware(mcp.http_app(path="/mcp"), max_requests=60, window_seconds=60),
-    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
+    allow_origins=_cors_origins,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["Mcp-Session-Id"],
@@ -1030,12 +1036,9 @@ def run_server():
     transport = settings.transport.lower()
 
     if transport == "http":
+        import uvicorn
         logger.info(f"Starting HTTP server on {settings.host}:{settings.port}")
-        mcp.run(
-            transport="http",
-            host=settings.host,
-            port=settings.port,
-        )
+        uvicorn.run(app, host=settings.host, port=settings.port)
     else:
         logger.info("Starting STDIO server")
         mcp.run()
