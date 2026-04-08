@@ -8,18 +8,21 @@ MCP Apps extension provides interactive UI for citation validation results.
 
 import asyncio
 import functools
+import hashlib
 import json
 import os
+from collections import OrderedDict
 from typing import Annotated, Any, Optional
 
 import httpx
 from fastmcp import FastMCP, Context
 from fastmcp.exceptions import ToolError
 from fastmcp.apps import AppConfig, ResourceCSP
+from fastmcp.server.dependencies import get_http_request
 from pydantic import Field
 from starlette.responses import JSONResponse
 
-from .api.client import CourtListenerClient
+from .api.client import CircuitBreaker, CourtListenerClient
 from .errors import AuthenticationError
 from .config.api_constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, OPINION_URL_TEMPLATE
 from .config.log_config import setup_logging
@@ -59,18 +62,28 @@ def citation_view_resource() -> str:
     return CITATION_VIEW_HTML
 
 
-# Lazy-initialized client
-_client: Optional[CourtListenerClient] = None
-_client_lock: Optional[asyncio.Lock] = None
+# Multi-tenant client pool — one CourtListenerClient per API token (LRU).
+# Rate limiting is per-client (per-user). Circuit breaker is shared (reflects
+# CourtListener API health globally, not per-user state).
+_client_pool: OrderedDict[str, CourtListenerClient] = OrderedDict()
+_client_pool_lock: Optional[asyncio.Lock] = None
+_shared_circuit_breaker: Optional[CircuitBreaker] = None
 _settings = None
+_POOL_MAX_SIZE = 1000
 
 
-def _get_client_lock() -> asyncio.Lock:
-    """Get or create the client initialization lock (lazy so it's bound to the running loop)."""
-    global _client_lock
-    if _client_lock is None:
-        _client_lock = asyncio.Lock()
-    return _client_lock
+def _get_pool_lock() -> asyncio.Lock:
+    global _client_pool_lock
+    if _client_pool_lock is None:
+        _client_pool_lock = asyncio.Lock()
+    return _client_pool_lock
+
+
+def _get_shared_circuit_breaker() -> CircuitBreaker:
+    global _shared_circuit_breaker
+    if _shared_circuit_breaker is None:
+        _shared_circuit_breaker = CircuitBreaker()
+    return _shared_circuit_breaker
 
 
 def _get_settings():
@@ -80,25 +93,32 @@ def _get_settings():
     return _settings
 
 
-async def _get_client(ctx: Optional[Context] = None) -> CourtListenerClient:
+async def _resolve_token(ctx: Optional[Context] = None) -> Optional[str]:
     """
-    Get or create the API client. Uses elicitation to request token if missing.
+    Resolve the CourtListener API token, in priority order:
 
-    Args:
-        ctx: FastMCP context for elicitation support
-
-    Returns:
-        Configured CourtListenerClient
-
-    Raises:
-        ToolError: If no API token is available
+    1. X-CourtListener-Token HTTP header — per-request, multi-tenant deployments
+       (Free Law or any MCP gateway passing per-user credentials)
+    2. COURTLISTENER_API_TOKEN env var / DPAPI — single-user / self-hosted fallback
+    3. Elicitation — interactive STDIO clients that support prompting the user
     """
-    global _client
+    # 1. Per-request header (HTTP transport, multi-tenant)
+    try:
+        request = get_http_request()
+        header_token = request.headers.get("x-courtlistener-token")
+        if header_token:
+            return header_token.strip()
+    except RuntimeError:
+        pass  # STDIO transport — no HTTP request context
 
+    # 2. Env var / DPAPI (single-user self-hosted)
     settings = _get_settings()
     token = settings.get_api_token()
+    if token:
+        return token
 
-    if not token and ctx:
+    # 3. Elicitation (interactive STDIO only)
+    if ctx:
         try:
             result = await ctx.elicit(
                 "CourtListener API token is required.\n"
@@ -108,27 +128,54 @@ async def _get_client(ctx: Optional[Context] = None) -> CourtListenerClient:
             )
             if result.action == "accept" and result.data:
                 token = result.data.strip()
-                # Try to store via DPAPI for future sessions
                 try:
                     from .shared.secure_storage import store_api_token
                     store_api_token(token)
                 except Exception:
                     pass
                 settings.courtlistener_api_token = token
+                return token
         except Exception as e:
             logger.debug(f"Elicitation not supported by client: {e}")
 
+    return None
+
+
+async def _get_client(ctx: Optional[Context] = None) -> CourtListenerClient:
+    """
+    Get or create a per-user API client from the pool.
+
+    In multi-tenant mode (HTTP transport), reads X-CourtListener-Token and
+    returns a client scoped to that user. Rate limiting is per-user; the
+    circuit breaker is shared across all users.
+
+    Falls back to env var / DPAPI / elicitation for single-user deployments.
+    """
+    token = await _resolve_token(ctx)
+
     if not token:
         raise ToolError(
-            "CourtListener API token not configured. Set COURTLISTENER_API_TOKEN "
-            "environment variable or run deploy/windows_setup.ps1 for DPAPI storage."
+            "CourtListener API token not configured. "
+            "Pass X-CourtListener-Token header, or set COURTLISTENER_API_TOKEN env var."
         )
 
-    async with _get_client_lock():
-        if _client is None:
-            _client = CourtListenerClient(token=token)
+    token_key = hashlib.sha256(token.encode()).hexdigest()
 
-    return _client
+    async with _get_pool_lock():
+        if token_key in _client_pool:
+            _client_pool.move_to_end(token_key)
+            return _client_pool[token_key]
+
+        client = CourtListenerClient(
+            token=token,
+            circuit_breaker=_get_shared_circuit_breaker(),
+        )
+        _client_pool[token_key] = client
+
+        if len(_client_pool) > _POOL_MAX_SIZE:
+            _client_pool.popitem(last=False)  # evict LRU
+
+        return client
 
 
 def _format_results(data: Any) -> str:
@@ -153,8 +200,6 @@ def _handle_client_errors(func):
         try:
             return await func(*args, **kwargs)
         except AuthenticationError:
-            global _client
-            _client = None  # Force re-creation with fresh token on next call
             raise
         except ToolError:
             raise  # Already user-friendly (includes our custom errors)

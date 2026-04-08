@@ -88,13 +88,15 @@ def reset_main_globals():
     import courtlistener_mcp.main as main_module
 
     # --- setup: reset to known-clean state ---
-    main_module._client = None
-    main_module._client_lock = None
+    main_module._client_pool.clear()
+    main_module._client_pool_lock = None
+    main_module._shared_circuit_breaker = None
     main_module._settings = None
 
     yield
 
     # --- teardown: reset again to avoid polluting later tests ---
-    main_module._client = None
-    main_module._client_lock = None
+    main_module._client_pool.clear()
+    main_module._client_pool_lock = None
+    main_module._shared_circuit_breaker = None
     main_module._settings = None

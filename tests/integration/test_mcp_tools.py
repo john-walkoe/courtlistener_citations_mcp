@@ -3,9 +3,10 @@ Integration tests for courtlistener_mcp.main.
 
 Covers:
 - _handle_client_errors decorator: error conversion and pass-through
-- AuthenticationError resets _client to None (audit fix 2)
-- Non-auth ToolError does NOT reset _client
-- Concurrent _get_client() calls produce a single CourtListenerClient (audit fix 1)
+- AuthenticationError propagates; client pool is unchanged (multi-tenant: one
+  user's auth failure does not evict other users' cached clients)
+- Non-auth ToolError does NOT disturb the client pool
+- Concurrent _get_client() calls for the same token produce a single instance
 """
 
 import asyncio
@@ -136,19 +137,32 @@ class TestHandleClientErrors:
 
 
 # =============================================================================
-# _client reset on AuthenticationError (audit fix 2)
+# Auth error handling with multi-tenant client pool
 # =============================================================================
 
 
 class TestClientResetOnAuthError:
-    """AuthenticationError must reset _client to None so the next call re-initialises."""
+    """
+    AuthenticationError propagates to the caller. In multi-tenant mode, one
+    user's bad token does not evict other users' cached clients from the pool.
+    """
 
-    async def test_auth_error_resets_client_to_none(self):
+    async def test_auth_error_propagates(self):
+        """AuthenticationError must re-raise unchanged through the decorator."""
+        @_decorated
+        async def fn():
+            raise AuthenticationError("token expired")
+
+        with pytest.raises(AuthenticationError):
+            await fn()
+
+    async def test_auth_error_does_not_clear_pool(self):
         """
-        When a decorated function raises AuthenticationError, main._client must
-        be set to None after the exception propagates.
+        An AuthenticationError must not disturb other users' pool entries.
+        Multi-tenant: one bad token is isolated; other users' clients remain cached.
         """
-        main_module._client = MagicMock(spec=CourtListenerClient)
+        sentinel = MagicMock(spec=CourtListenerClient)
+        main_module._client_pool["other_user_key"] = sentinel
 
         @_decorated
         async def fn():
@@ -157,15 +171,12 @@ class TestClientResetOnAuthError:
         with pytest.raises(AuthenticationError):
             await fn()
 
-        assert main_module._client is None
+        assert main_module._client_pool.get("other_user_key") is sentinel
 
-    async def test_non_auth_tool_error_does_not_reset_client(self):
-        """
-        A ToolError that is NOT an AuthenticationError (e.g. NotFoundError) must
-        NOT reset _client — only auth failures should clear the cached client.
-        """
-        sentinel_client = MagicMock(spec=CourtListenerClient)
-        main_module._client = sentinel_client
+    async def test_non_auth_tool_error_does_not_disturb_pool(self):
+        """A non-auth ToolError must not disturb the client pool."""
+        sentinel = MagicMock(spec=CourtListenerClient)
+        main_module._client_pool["some_key"] = sentinel
 
         @_decorated
         async def fn():
@@ -174,22 +185,7 @@ class TestClientResetOnAuthError:
         with pytest.raises(NotFoundError):
             await fn()
 
-        # _client should still be the same object
-        assert main_module._client is sentinel_client
-
-    async def test_plain_tool_error_does_not_reset_client(self):
-        """A vanilla ToolError (not an AuthenticationError) must not reset _client."""
-        sentinel_client = MagicMock(spec=CourtListenerClient)
-        main_module._client = sentinel_client
-
-        @_decorated
-        async def fn():
-            raise ToolError("some user-visible error")
-
-        with pytest.raises(ToolError):
-            await fn()
-
-        assert main_module._client is sentinel_client
+        assert main_module._client_pool.get("some_key") is sentinel
 
 
 # =============================================================================
@@ -199,76 +195,69 @@ class TestClientResetOnAuthError:
 
 class TestConcurrentClientInit:
     """
-    Multiple concurrent calls to _get_client() must result in exactly ONE
-    CourtListenerClient being constructed (the lock prevents double-init).
+    Multiple concurrent calls to _get_client() with the same token must produce
+    exactly ONE CourtListenerClient (pool lock prevents double-init).
+    Different tokens produce independent clients.
     """
 
-    async def test_concurrent_client_init_creates_single_instance(self):
+    async def test_concurrent_calls_same_token_creates_single_instance(self):
         """
-        Three concurrent calls to _get_client() must each get the same instance
-        and the CourtListenerClient constructor must be called exactly once.
+        Three concurrent _get_client() calls for the same token must each
+        receive the same instance — constructor called exactly once.
         """
-        # Ensure clean state (autouse fixture already runs but we reset explicitly)
-        main_module._client = None
-        main_module._client_lock = None
+        main_module._client_pool.clear()
+        main_module._client_pool_lock = None
 
         construction_count = 0
         created_instance = None
 
         class TrackingClient:
-            """Fake CourtListenerClient that counts constructions."""
-            def __init__(self, token: str):
+            def __init__(self, token: str, circuit_breaker=None):
                 nonlocal construction_count, created_instance
                 construction_count += 1
                 created_instance = self
 
-        # Mock settings to supply a token
         mock_settings = MagicMock()
         mock_settings.get_api_token.return_value = "test_token_12345678901234567890"
 
         with patch("courtlistener_mcp.main._get_settings", return_value=mock_settings):
             with patch("courtlistener_mcp.main.CourtListenerClient", TrackingClient):
-                results = await asyncio.gather(
-                    main_module._get_client(),
-                    main_module._get_client(),
-                    main_module._get_client(),
-                )
+                with patch("courtlistener_mcp.main.get_http_request", side_effect=RuntimeError):
+                    results = await asyncio.gather(
+                        main_module._get_client(),
+                        main_module._get_client(),
+                        main_module._get_client(),
+                    )
 
-        # Only one construction should have occurred
         assert construction_count == 1
-
-        # All three calls must have received the same instance
         assert results[0] is results[1]
         assert results[1] is results[2]
         assert results[0] is created_instance
 
     async def test_get_client_raises_tool_error_without_token(self):
-        """
-        When no token is available and no ctx is provided, _get_client must
-        raise a ToolError with a helpful message.
-        """
-        main_module._client = None
-        main_module._client_lock = None
+        """No token from any source must raise a ToolError with setup guidance."""
+        main_module._client_pool.clear()
+        main_module._client_pool_lock = None
 
         mock_settings = MagicMock()
         mock_settings.get_api_token.return_value = None
 
         with patch("courtlistener_mcp.main._get_settings", return_value=mock_settings):
-            with pytest.raises(ToolError, match="COURTLISTENER_API_TOKEN"):
-                await main_module._get_client(ctx=None)
+            with patch("courtlistener_mcp.main.get_http_request", side_effect=RuntimeError):
+                with pytest.raises(ToolError, match="X-CourtListener-Token"):
+                    await main_module._get_client(ctx=None)
 
-    async def test_get_client_returns_existing_client(self):
-        """
-        If _client is already set, _get_client should return it without
-        constructing a new one.
-        """
-        existing = MagicMock(spec=CourtListenerClient)
-        main_module._client = existing
+    async def test_pool_returns_cached_client_for_same_token(self):
+        """Same token on a second call returns the already-cached client without reconstruction."""
+        main_module._client_pool.clear()
+        main_module._client_pool_lock = None
 
         mock_settings = MagicMock()
         mock_settings.get_api_token.return_value = "test_token_12345678901234567890"
 
         with patch("courtlistener_mcp.main._get_settings", return_value=mock_settings):
-            result = await main_module._get_client()
+            with patch("courtlistener_mcp.main.get_http_request", side_effect=RuntimeError):
+                first = await main_module._get_client()
+                second = await main_module._get_client()
 
-        assert result is existing
+        assert first is second

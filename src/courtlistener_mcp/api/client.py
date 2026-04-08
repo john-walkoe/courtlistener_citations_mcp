@@ -205,13 +205,16 @@ class RateLimiter:
 class CourtListenerClient:
     """Async client for CourtListener REST API v4."""
 
-    def __init__(self, token: str):
+    def __init__(self, token: str, circuit_breaker: Optional["CircuitBreaker"] = None):
         self._token = token
         self._rate_limiter = RateLimiter()
         self._citation_rate_limiter = RateLimiter(
             max_per_minute=CITATION_RATE_LIMIT_PER_MINUTE
         )
-        self._circuit_breaker = CircuitBreaker()
+        # Accept a shared circuit breaker so all per-user clients reflect the same
+        # CourtListener API health state. Falls back to a private instance for
+        # backward-compatible single-user use.
+        self._circuit_breaker = circuit_breaker if circuit_breaker is not None else CircuitBreaker()
         self._client: Optional[httpx.AsyncClient] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
