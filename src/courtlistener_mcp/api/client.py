@@ -485,6 +485,7 @@ class CourtListenerClient:
                 continue
 
             response.raise_for_status()
+            await self._circuit_breaker.record_success()
             result = response.json()
             return result if isinstance(result, list) else []
 
