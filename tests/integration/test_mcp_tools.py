@@ -261,3 +261,42 @@ class TestConcurrentClientInit:
                 second = await main_module._get_client()
 
         assert first is second
+
+    async def test_header_token_creates_client_and_caches_under_sha256_key(self):
+        """
+        X-CourtListener-Token header must create a client cached under SHA256(token),
+        not under the env-token key. Header path takes priority.
+        """
+        main_module._client_pool.clear()
+        main_module._client_pool_lock = None
+
+        header_token = "header_user_token_abc"
+        env_token = "env_user_token_xyz"
+
+        mock_settings = MagicMock()
+        mock_settings.get_api_token.return_value = env_token
+
+        mock_request = MagicMock()
+        mock_request.headers = MagicMock()
+        mock_request.headers.get = lambda k: header_token if k == "x-courtlistener-token" else None
+
+        with patch("courtlistener_mcp.main._get_settings", return_value=mock_settings):
+            with patch("courtlistener_mcp.main.get_http_request", return_value=mock_request):
+                client = await main_module._get_client()
+
+        # Client must be created with the header token, not the env token
+        assert client._token == header_token
+
+        # Must be cached under SHA256(header_token), not SHA256(env_token)
+        import hashlib
+        header_key = hashlib.sha256(header_token.encode()).hexdigest()
+        env_key = hashlib.sha256(env_token.encode()).hexdigest()
+        assert main_module._client_pool.get(header_key) is client
+        assert main_module._client_pool.get(env_key) is None
+
+        # Second call with same header returns the cached instance
+        with patch("courtlistener_mcp.main._get_settings", return_value=mock_settings):
+            with patch("courtlistener_mcp.main.get_http_request", return_value=mock_request):
+                second = await main_module._get_client()
+
+        assert second is client
