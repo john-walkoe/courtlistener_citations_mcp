@@ -112,26 +112,9 @@ The token is **never stored in the MCP config file** — it is loaded at runtime
 
 ## Claude Desktop / Claude Code Configuration
 
-### Docker / HTTP Mode (Recommended for Full Feature Set)
+### STDIO Mode (Recommended)
 
-Docker is the recommended installation method. It enables the **interactive MCP App panel** — color-coded citation cards with clickable CourtListener links rendered inline in Claude Desktop.
-
-See [Docker / HTTP Mode](#docker--http-mode) below, then add this to your Claude config:
-
-```json
-{
-  "mcpServers": {
-    "courtlistener_citations": {
-      "command": "npx",
-      "args": ["mcp-remote", "http://localhost:8000/mcp"]
-    }
-  }
-}
-```
-
-### STDIO Mode (Text Results Only)
-
-> **Note:** STDIO mode works for all citation validation tools. However, the **interactive MCP App panel does not render in Claude Desktop via STDIO** — you will get text results only. DPAPI/Windows Credential Manager secure token storage is STDIO-only (Windows). Use Docker mode above for the full visual panel experience.
+STDIO is the recommended installation method. It supports the **interactive MCP App panel** — color-coded citation cards render inline in Claude Desktop with no Docker required. DPAPI/Windows Credential Manager secure token storage is STDIO-only (Windows).
 
 Add to your Claude config (`~/.claude.json` for Claude Code, or `~/.config/Claude/claude_desktop_config.json` for Claude Desktop):
 
@@ -338,6 +321,7 @@ http://localhost:8000/mcp
 | `HOST` | No | `0.0.0.0` | HTTP server bind address |
 | `PORT` | No | `8000` | HTTP server port |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
+| `CORS_ORIGINS` | No | `http://localhost:8080,http://127.0.0.1:8080` | Comma-separated list of allowed CORS origins (HTTP mode only). Add your reverse proxy or gateway URL here. |
 
 ### Dev Tunnel (Windows — for remote access)
 
