@@ -15,7 +15,7 @@ from typing import Annotated, Any, Optional
 import httpx
 from fastmcp import FastMCP, Context
 from fastmcp.exceptions import ToolError
-from fastmcp.server.apps import AppConfig, ResourceCSP
+from fastmcp.apps import AppConfig, ResourceCSP
 from pydantic import Field
 from starlette.responses import JSONResponse
 

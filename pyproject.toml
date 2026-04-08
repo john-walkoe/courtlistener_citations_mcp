@@ -12,7 +12,7 @@ authors = [
     {name = "John Walkoe"}
 ]
 dependencies = [
-    "fastmcp>=3.0.0b2",
+    "fastmcp[apps]>=3.0.0",
     "httpx[http2]>=0.28.1",
     "pydantic>=2.10.6",
     "pydantic-settings>=2.7.1",
