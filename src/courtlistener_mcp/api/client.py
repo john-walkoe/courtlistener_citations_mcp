@@ -114,6 +114,66 @@ def _validate_search_params(
             raise ValueError(f"{name} must be YYYY-MM-DD format")
 
 
+class CircuitBreaker:
+    """
+    Simple circuit breaker for external API calls.
+
+    States:
+      - CLOSED: normal operation, requests pass through
+      - OPEN: failures exceeded threshold, fast-fail without retry
+      - HALF_OPEN: after backoff, allow one test request
+    """
+
+    CLOSED, OPEN, HALF_OPEN = "closed", "open", "half_open"
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        backoff_seconds: float = 30.0,
+    ):
+        self._failure_threshold = failure_threshold
+        self._backoff_seconds = backoff_seconds
+        self._consecutive_failures = 0
+        self._state = self.CLOSED
+        self._opened_at: Optional[float] = None
+        self._lock = asyncio.Lock()
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    def _check_half_open(self) -> None:
+        """Transition OPEN -> HALF_OPEN after backoff."""
+        if (
+            self._state == self.OPEN
+            and self._opened_at is not None
+            and (time.monotonic() - self._opened_at) >= self._backoff_seconds
+        ):
+            self._state = self.HALF_OPEN
+            self._consecutive_failures = 0
+
+    async def can_proceed(self) -> bool:
+        """Return True if a request should proceed (not fast-failed)."""
+        async with self._lock:
+            self._check_half_open()
+            return self._state != self.OPEN
+
+    async def record_success(self) -> None:
+        """Record a successful request — close the circuit."""
+        async with self._lock:
+            self._consecutive_failures = 0
+            self._state = self.CLOSED
+            self._opened_at = None
+
+    async def record_failure(self) -> None:
+        """Record a failed request — open the circuit after threshold."""
+        async with self._lock:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._failure_threshold:
+                self._state = self.OPEN
+                self._opened_at = time.monotonic()
+
+
 class RateLimiter:
     """Simple token bucket rate limiter."""
 
@@ -151,6 +211,7 @@ class CourtListenerClient:
         self._citation_rate_limiter = RateLimiter(
             max_per_minute=CITATION_RATE_LIMIT_PER_MINUTE
         )
+        self._circuit_breaker = CircuitBreaker()
         self._client: Optional[httpx.AsyncClient] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -206,6 +267,15 @@ class CourtListenerClient:
         await self._rate_limiter.acquire()
         client = await self._get_client()
 
+        if not await self._circuit_breaker.can_proceed():
+            logger.warning(f"Circuit OPEN — fast-failing {path}")
+            raise httpx.HTTPStatusError(
+                "CourtListener API circuit open (service degraded). "
+                "Wait 30 seconds and try again.",
+                request=client.build_request(method, path),
+                response=httpx.Response(503),
+            )
+
         last_error: Optional[Exception] = None
 
         for attempt in range(DEFAULT_MAX_RETRIES):
@@ -256,6 +326,7 @@ class CourtListenerClient:
                     raise NotFoundError(f"Resource not found: {path}")
 
                 response.raise_for_status()
+                await self._circuit_breaker.record_success()
                 return response.json()
 
             except httpx.TimeoutException as e:
@@ -279,6 +350,7 @@ class CourtListenerClient:
                     )
 
         if last_error:
+            await self._circuit_breaker.record_failure()
             raise last_error
         raise RuntimeError(f"All {DEFAULT_MAX_RETRIES} retries exhausted for {path}")
 
@@ -366,6 +438,15 @@ class CourtListenerClient:
         """
         client = await self._get_client()
         await self._rate_limiter.acquire()
+
+        if not await self._circuit_breaker.can_proceed():
+            logger.warning("Circuit OPEN — fast-failing citation-lookup")
+            raise httpx.HTTPStatusError(
+                "CourtListener citation API circuit open (service degraded). "
+                "Wait 30 seconds and try again.",
+                request=client.build_request("POST", "/citation-lookup/"),
+                response=httpx.Response(503),
+            )
 
         for attempt in range(DEFAULT_MAX_RETRIES):
             try:
