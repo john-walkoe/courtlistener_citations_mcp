@@ -15,6 +15,7 @@ A Model Context Protocol (MCP) server for validating legal citations against the
 | **[📖 Usage Examples](USAGE_EXAMPLES.md)** | Workflows, fallback chain examples, and cross-MCP integration patterns |
 | **[🎯 Prompt Templates](PROMPTS.md)** | Ready-to-use prompt templates for brief audits, hallucination triage, and pre-filing checklists |
 | **[🛡️ Security Scanning](SECURITY_SCANNING.md)** | Automated secret detection and prompt injection protection guide |
+| **[🏢 Enterprise Gateway Deployment](MCP_GATEWAY.md)** | Multi-user deployment via Bifrost, Azure APIM, or Microsoft MCP Gateway — per-user API keys, Entra ID SSO, bulk provisioning |
 | **[⚖️ License](LICENSE)** | MIT License terms and conditions |
 
 ## Demo
@@ -173,6 +174,7 @@ Add to `.claude.json` in your project root or `~/.claude.json` globally:
 - **SafeLogger with Auto-Sanitization** - Automatically masks API tokens, passwords, and sensitive data in all log messages
 - **File-Based Logging with Rotation** - Persistent audit trail with 10MB rotation in `~/.courtlistener_citations_mcp/logs/`
 - **Rate Limiting** - Dual token-bucket limiters: 83 req/min general (≤5,000/hr), 60 valid-citations/min for citation-lookup; automatic `wait_until` parsing on 429 responses
+- **Multi-Tenant / Enterprise Ready** - Per-user client pool (LRU, 1000 entries) keyed by API token; each user gets their own rate limiter; shared circuit breaker reflects CourtListener API health globally. Accepts tokens via `Authorization: Bearer` (self-hosted) or `X-CourtListener-Token` (gateway-injected). See [MCP_GATEWAY.md](MCP_GATEWAY.md) for Bifrost/APIM deployment.
 - **Cross-Platform** - Works on Linux and Windows (DPAPI on Windows, env var fallback on Linux)
 
 ### Workflow Design
@@ -249,12 +251,15 @@ Use `courtlistener_citations_get_guidance(section)` with these sections:
 
 ## Transport Modes
 
-| Mode | Use Case | MCP App Panel | Secure Token Storage | Configuration |
-|------|----------|--------------|---------------------|---------------|
-| **STDIO** | Claude Desktop, Claude Code | ✅ Full panel | Windows Credential Manager + DPAPI (Windows only) | Default |
-| **HTTP (Docker)** | CoPilot Studio, web clients, remote access | ✅ Full panel | `.env` file | `TRANSPORT=http` via docker-compose |
+| Mode | Use Case | MCP App Panel | Auth / Token Storage | Configuration |
+|------|----------|--------------|----------------------|---------------|
+| **STDIO** | Claude Desktop, Claude Code (single user) | ✅ Full panel | Windows Credential Manager + DPAPI (Windows) or env var | Default |
+| **HTTP (Docker/direct)** | CoPilot Studio, web clients, single-host remote | ✅ Full panel | `COURTLISTENER_API_TOKEN` in `.env` or `Authorization: Bearer` header | `TRANSPORT=http` |
+| **HTTP (Gateway)** | Law firm / enterprise, multi-user, Entra ID SSO | ❌ Panel not rendered through proxy | Per-user via `X-CourtListener-Token` injected by gateway (Bifrost, APIM) | See [MCP_GATEWAY.md](MCP_GATEWAY.md) |
 
-> **MCP App panel** renders interactive color-coded citation cards inline in Claude Desktop via the MCP resources protocol — no HTTP or Docker required for the visual panel.
+> **MCP App panel** renders interactive color-coded citation cards inline in Claude Desktop. Works in STDIO and direct HTTP mode. Does not render when proxied through any gateway — but the tool's structured output and prompt engineering guide the LLM to produce an equivalent in-conversation report without the panel.
+
+> **Per-user rate limiting:** In gateway deployments, each user's CourtListener API key gets its own 60-citation/min bucket. A shared circuit breaker reflects overall CourtListener API health without affecting per-user limits. See [MCP_GATEWAY.md](MCP_GATEWAY.md) for architecture details.
 
 > **DPAPI / Windows Credential Manager** secure storage is only available in STDIO mode on Windows. Docker containers run Linux and cannot access Windows Credential Manager — use a `.env` file instead.
 

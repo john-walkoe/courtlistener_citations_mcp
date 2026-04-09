@@ -1,5 +1,5 @@
 {
-  "INSTALL.md": {},
-  "PROMPTS.md": {},
-  "USAGE_EXAMPLES.md": {}
+  "MCP_GATEWAY.md": {},
+  "README.md": {},
+  "docker-compose.yml": {}
 }

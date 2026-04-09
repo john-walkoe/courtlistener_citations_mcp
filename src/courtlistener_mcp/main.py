@@ -97,14 +97,25 @@ async def _resolve_token(ctx: Optional[Context] = None) -> Optional[str]:
     """
     Resolve the CourtListener API token, in priority order:
 
-    1. X-CourtListener-Token HTTP header — per-request, multi-tenant deployments
-       (Free Law or any MCP gateway passing per-user credentials)
-    2. COURTLISTENER_API_TOKEN env var / DPAPI — single-user / self-hosted fallback
-    3. Elicitation — interactive STDIO clients that support prompting the user
+    1. Authorization: Bearer <token> — standard HTTP header; use this for self-hosted
+       deployments where the MCP client sends the token directly (Claude Desktop
+       `headers` config, mcp-remote, etc.)
+    2. X-CourtListener-Token HTTP header — injected by an MCP gateway (Bifrost,
+       Azure APIM, etc.) that maps per-user identity to a CourtListener API key
+    3. COURTLISTENER_API_TOKEN env var / DPAPI — single-user / self-hosted fallback
+    4. Elicitation — interactive STDIO clients that support prompting the user
     """
-    # 1. Per-request header (HTTP transport, multi-tenant)
+    # 1 & 2. HTTP transport — header resolution (multi-tenant or self-hosted HTTP)
     try:
         request = get_http_request()
+        # Authorization: Bearer (standard; self-hosted users configure this in their
+        # MCP client — no gateway required)
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            bearer = auth_header[7:].strip()
+            if bearer:
+                return bearer
+        # X-CourtListener-Token (injected by MCP gateway — Bifrost, APIM, etc.)
         header_token = request.headers.get("x-courtlistener-token")
         if header_token:
             return header_token.strip()
