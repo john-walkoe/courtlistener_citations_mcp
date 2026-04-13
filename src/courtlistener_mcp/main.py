@@ -1063,6 +1063,7 @@ async def health_check(request):
 # =============================================================================
 
 from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse as _JSONResponse
 from .shared.http_rate_limit import InboundRateLimitMiddleware
 
 _cors_origins = [
@@ -1073,12 +1074,50 @@ _cors_origins = [
     if o.strip()
 ]
 
-app = CORSMiddleware(
-    InboundRateLimitMiddleware(mcp.http_app(path="/mcp"), max_requests=60, window_seconds=60),
-    allow_origins=_cors_origins,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-    expose_headers=["Mcp-Session-Id"],
+
+class _StreamableHTTPProbeMiddleware:
+    """Return 401 for MCP probe requests that lack the required Accept header.
+
+    claude.ai's MCP client first probes POST /mcp with an older format that
+    omits 'text/event-stream' from Accept.  FastMCP's StreamableHTTP handler
+    rejects those with 406, which puts claude.ai into a permanent
+    "format-incompatible" state where it never indexes the server's tools.
+
+    Returning 401 instead causes claude.ai to attempt OAuth discovery (which
+    returns 404 — expected), and then fall back to an anonymous connection
+    that completes the full MCP handshake successfully.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            method = scope.get("method", "")
+            path = scope.get("path", "")
+            headers = dict(scope.get("headers", []))
+            accept = headers.get(b"accept", b"").decode()
+
+            if (
+                method == "POST"
+                and path == "/mcp"
+                and "text/event-stream" not in accept
+            ):
+                response = _JSONResponse({"error": "Unauthorized"}, status_code=401)
+                await response(scope, receive, send)
+                return
+
+        await self.app(scope, receive, send)
+
+
+app = _StreamableHTTPProbeMiddleware(
+    CORSMiddleware(
+        InboundRateLimitMiddleware(mcp.http_app(path="/mcp"), max_requests=60, window_seconds=60),
+        allow_origins=_cors_origins,
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["Mcp-Session-Id"],
+    )
 )
 
 
