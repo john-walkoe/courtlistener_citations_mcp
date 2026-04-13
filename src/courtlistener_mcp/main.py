@@ -11,6 +11,7 @@ import functools
 import hashlib
 import json
 import os
+import re
 from collections import OrderedDict
 from typing import Annotated, Any, Optional
 
@@ -139,15 +140,19 @@ async def _resolve_token(ctx: Optional[Context] = None) -> Optional[str]:
             )
             if result.action == "accept" and result.data:
                 token = result.data.strip()
+                if not re.fullmatch(r"[0-9a-f]{40}", token):
+                    raise ToolError(
+                        "Invalid API token format. Expected a 40-character hex string."
+                    )
                 try:
                     from .shared.secure_storage import store_api_token
                     store_api_token(token)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to persist API token: {e}")
                 settings.courtlistener_api_token = token
                 return token
         except Exception as e:
-            logger.debug(f"Elicitation not supported by client: {e}")
+            logger.warning(f"Elicitation failed: {type(e).__name__}: {e}")
 
     return None
 
@@ -398,8 +403,13 @@ async def validate_citations(
                 name = " v. ".join(filter(None, [cc.get("plaintiff", ""), cc.get("defendant", "")]))
                 if name:
                     claimed_names[key] = name
-    except Exception:
-        pass  # Name extraction failure doesn't block citation validation
+    except ImportError:
+        pass  # eyecite not installed — skip name extraction
+    except Exception as e:
+        logger.warning(
+            f"Citation name extraction failed (mismatch detection disabled): "
+            f"{type(e).__name__}: {e}"
+        )
 
     results = await client.validate_citations(text)
 

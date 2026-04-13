@@ -22,6 +22,10 @@ class InboundRateLimitMiddleware:
         self.requests: dict[str, list[float]] = defaultdict(list)
         self._lock = asyncio.Lock()
         self._last_cleanup = time.monotonic()
+        # Cleanup interval matches the window so stale IPs are pruned at the same
+        # cadence as the window itself (avoids hardcoding a 60s interval that would
+        # be misaligned with large windows)
+        self._cleanup_interval = window_seconds
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -31,8 +35,8 @@ class InboundRateLimitMiddleware:
         now = time.monotonic()
 
         async with self._lock:
-            # Periodic cleanup of stale IPs (every 60s)
-            if now - self._last_cleanup > 60:
+            # Periodic cleanup of stale IPs
+            if now - self._last_cleanup > self._cleanup_interval:
                 cutoff = now - self.window_seconds
                 self.requests = defaultdict(list, {
                     ip: [t for t in timestamps if t > cutoff]

@@ -484,6 +484,19 @@ class CourtListenerClient:
                 await asyncio.sleep(wait)
                 continue
 
+            if response.status_code == 401:
+                security_logger.warning(
+                    "Authentication failure: CourtListener API token invalid or expired (HTTP 401)"
+                )
+                raise AuthenticationError(
+                    "CourtListener API token is invalid or expired. "
+                    "Get a new token at: https://www.courtlistener.com/sign-in/"
+                )
+            if response.status_code == 403:
+                raise AuthenticationError(
+                    "API token lacks permission for this endpoint."
+                )
+
             response.raise_for_status()
             await self._circuit_breaker.record_success()
             result = response.json()
