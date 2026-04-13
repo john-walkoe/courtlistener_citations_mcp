@@ -1073,6 +1073,9 @@ _cors_origins = [
     ).split(",")
     if o.strip()
 ]
+_cors_extra_origin = os.environ.get("CORS_EXTRA_ORIGIN", "").strip()
+if _cors_extra_origin:
+    _cors_origins.append(_cors_extra_origin)
 
 
 class _StreamableHTTPProbeMiddleware:
