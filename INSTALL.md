@@ -322,6 +322,8 @@ http://localhost:8000/mcp
 | `PORT` | No | `8000` | HTTP server port |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
 | `CORS_ORIGINS` | No | `http://localhost:8080,http://127.0.0.1:8080` | Comma-separated list of allowed CORS origins (HTTP mode only). Add your reverse proxy or gateway URL here. |
+| `CORS_EXTRA_ORIGIN` | No | None | Single additional CORS origin to allow. Set to `https://claude.ai` when exposing the server directly to claude.ai. |
+| `INTERNAL_AUTH_SECRET` | No | None | Shared secret for endpoint protection (`x-api-key` header). Omit to allow unauthenticated access. When set, inject via your reverse proxy so MCP clients do not need to configure the header manually. |
 
 ### Dev Tunnel (Windows — for remote access)
 

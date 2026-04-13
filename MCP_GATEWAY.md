@@ -7,18 +7,21 @@
 
 ## The Interface Contract
 
-The MCP server expects one thing from any gateway in front of it:
+The MCP server uses two distinct authentication layers. Gateways must inject both headers when endpoint auth is enforced:
 
 ```
-X-CourtListener-Token: <user's-courtlistener-api-key>
+x-api-key: <INTERNAL_AUTH_SECRET>          # Endpoint protection (opt-in — omit if not set)
+X-CourtListener-Token: <user's-cl-api-key> # Per-user CourtListener data access
 ```
 
-This header must arrive on every MCP request (initialize, tools/list, tools/call). The server:
+**`x-api-key` / `INTERNAL_AUTH_SECRET`** — protects the MCP server endpoint itself. If `INTERNAL_AUTH_SECRET` is set on the server, all non-health requests must include this header or receive HTTP 401. If the variable is not set, the check is skipped (open access). In production deployments behind a reverse proxy or gateway, inject `x-api-key` at the proxy layer — MCP clients (Claude Desktop, claude.ai) do not need to configure it manually.
+
+**`X-CourtListener-Token`** — the user's own CourtListener API key for data access. Required for any tool that calls the CourtListener API. This header must arrive on every MCP request (initialize, tools/list, tools/call). The server:
 - Hashes the token with SHA256 to create a per-user pool key
 - Returns or creates a `CourtListenerClient` for that user
 - Each client has its own `RateLimiter` (60 citations/min) and shares a `CircuitBreaker`
 
-The gateway's job is: authenticate the user (Entra ID or other IdP) → map identity to CL API key → inject the header. The MCP server does not care which gateway did this.
+The gateway's job is: authenticate the user (Entra ID or other IdP) → map identity to CL API key → inject both headers. The MCP server does not care which gateway did this.
 
 ### What the Server Already Handles
 
@@ -26,12 +29,13 @@ Everything below is implemented and requires no gateway changes:
 
 | Capability | Status |
 |---|---|
+| `x-api-key` endpoint auth (opt-in via `INTERNAL_AUTH_SECRET`) | ✓ Implemented |
 | `X-CourtListener-Token` header auth | ✓ Implemented |
 | Per-user client pool (LRU, 1000 entries) | ✓ Implemented |
 | Per-user rate limiter (60 citations/min) | ✓ Implemented |
 | Shared circuit breaker (CourtListener API health) | ✓ Implemented |
 | Single-user fallback (env var / DPAPI, backward compat) | ✓ Implemented |
-| CORS origins configurable via `CORS_ORIGINS` env var | ✓ Implemented |
+| CORS origins configurable via `CORS_ORIGINS` / `CORS_EXTRA_ORIGIN` env vars | ✓ Implemented |
 
 **Self-hosted without a gateway:** For individual or small-team use, the server accepts a CourtListener API token in a standard `Authorization: Bearer <token>` header — no gateway required. Configure it directly in your MCP client:
 
@@ -171,6 +175,7 @@ Each lawyer gets a Bifrost virtual key (configured via Bifrost API or UI). The v
     "connection_string": "https://mcp.courtlistener.com/mcp",
     "auth_type": "headers",
     "headers": {
+      "x-api-key": "<INTERNAL_AUTH_SECRET>",
       "X-CourtListener-Token": "<jane's-courtlistener-api-key>"
     },
     "tools_to_execute": ["courtlistener_validate_citations", "courtlistener_extract_citations",
@@ -286,6 +291,7 @@ with open("lawyers.csv") as f:
                 "connection_string": "https://mcp.courtlistener.com/mcp",
                 "auth_type": "headers",
                 "headers": {
+                    "x-api-key": INTERNAL_AUTH_SECRET,
                     "X-CourtListener-Token": row["cl_api_key"]
                 },
                 "tools_to_execute": ["*"] if row["department"] == "Litigation" else
@@ -575,7 +581,7 @@ Answer these before starting:
 
 1. **API keys** — Decide provisioning model (A or B above). Collect or generate keys for the pilot group.
 2. **Entra ID app registration** — Create the app reg, expose the API scope, authorize MCP client apps (Step 1 of the Bifrost section above).
-3. **Deploy MCP server** — Docker or Kubernetes, `COURTLISTENER_API_TOKEN` left unset (forces header-only mode — any request without `X-CourtListener-Token` is rejected, ensuring no shared-key fallback in production).
+3. **Deploy MCP server** — Docker or Kubernetes. Set `INTERNAL_AUTH_SECRET` to a random secret; configure the gateway to inject `x-api-key` with that value on every request. Leave `COURTLISTENER_API_TOKEN` unset (forces header-only mode — any request without `X-CourtListener-Token` is rejected, ensuring no shared-key fallback in production).
 4. **Gateway trial** — Configure OIDC + one virtual key. Test the full auth flow end-to-end with a single test user before bulk provisioning.
 5. **Pilot: 5–10 lawyers** — Validate rate limit behavior, error messages, and the in-conversation report format. Confirm no matter attribution requirement.
 6. **Bulk provisioning** — Import full roster via the provisioning script. Configure practice group tool policies.

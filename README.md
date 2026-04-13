@@ -224,13 +224,13 @@ Add to `.claude.json` in your project root or `~/.claude.json` globally:
 
 This MCP supports Claude Code's built-in tool search optimization, reducing context window usage through dynamic tool discovery.
 
-**Always-Available Tools** (loaded immediately):
-1. `courtlistener_extract_citations` - Local citation discovery (eyecite, no API)
-2. `courtlistener_validate_citations` - Primary citation validation
-3. `courtlistener_citations_get_guidance` - Workflow guidance and documentation
-4. `courtlistener_search_cases` - Fallback search by case name
+**Always-Available Tools** (loaded immediately — non-deferred):
+1. `courtlistener_validate_citations` - Primary citation validation
+2. `courtlistener_citations_get_guidance` - Workflow guidance and documentation
 
-**Discovered On-Demand:**
+**Discovered On-Demand** (deferred — searched via BM25):
+3. `courtlistener_extract_citations` - Local citation discovery (eyecite, no API)
+4. `courtlistener_search_cases` - Fallback search by case name
 5. `courtlistener_get_cluster` - Case details and CourtListener URLs
 6. `courtlistener_search_clusters` - Filtered cluster search
 7. `courtlistener_lookup_citation` - Direct citation lookup
@@ -506,6 +506,9 @@ In short: slightly longer time before the first tool call → much shorter total
 | `HOST` | No | `0.0.0.0` | HTTP server bind address |
 | `PORT` | No | `8000` | HTTP server port |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
+| `CORS_ORIGINS` | No | `http://localhost:8080,...` | Comma-separated CORS allowed origins (HTTP mode) |
+| `CORS_EXTRA_ORIGIN` | No | None | Single extra CORS origin to append (e.g. `https://claude.ai` for direct claude.ai connector) |
+| `INTERNAL_AUTH_SECRET` | No | None | Shared secret for endpoint auth. If set, all non-health requests must include `x-api-key: <secret>`. Omit to run unauthenticated (dev/trusted environments). |
 
 ## Cross-MCP Integration
 
@@ -662,6 +665,7 @@ if (Test-Path ".venv") {
 - **Tokens never logged** - API tokens never included in error messages or log output
 - **`User-Agent` header** - Identifies the MCP to CourtListener
 - **Rate limiting** - Dual token-bucket limiters (83 req/min general, 60 valid-citations/min for citation-lookup) prevent API abuse and stay within CourtListener's 5,000/hr cap
+- **Endpoint auth (opt-in)** - Set `INTERNAL_AUTH_SECRET` to require an `x-api-key` header on all non-health requests. Leave unset for open access (local dev, trusted internal networks). In gateway deployments, the gateway injects `x-api-key` at the proxy layer so clients do not need to configure the header manually.
 
 ### Error Handling
 - **Retry with exponential backoff** - 3 attempts for transient failures (429, 5xx)
