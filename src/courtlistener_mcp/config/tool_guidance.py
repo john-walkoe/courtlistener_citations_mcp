@@ -414,10 +414,15 @@ CRITICAL RULES — ALWAYS FOLLOW:
 - status 404 = ⚠️ SUSPECT — search_url is pre-built in the result, present it as 🔗 link
 
 ALWAYS-AVAILABLE TOOLS (non-deferred, immediate access):
-1. courtlistener_extract_citations - Local citation extraction (all types, no API key needed)
-2. courtlistener_validate_citations - Primary citation validation from document text
-3. courtlistener_citations_get_guidance - Workflow guidance and documentation
-4. courtlistener_search_cases - Fallback search by case name when citation not found
+1. courtlistener_validate_citations - Primary citation validation from document text
+2. courtlistener_citations_get_guidance - Workflow guidance and documentation
+
+SUPPORTING TOOLS (search for these as needed):
+- courtlistener_extract_citations - Local citation extraction, all types, no API key needed
+- courtlistener_search_cases - Fallback search by case name when citation not found
+- courtlistener_lookup_citation - Direct reporter citation lookup (last resort)
+- courtlistener_get_cluster - Full case details and CourtListener URLs
+- courtlistener_search_clusters - Search opinion clusters with filters
 
 CITATION VALIDATION WORKFLOW:
 0. courtlistener_extract_citations (DISCOVERY) - Extract all citation types locally

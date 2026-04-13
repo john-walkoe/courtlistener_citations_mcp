@@ -330,6 +330,7 @@ def _extract_case_summary(result: dict[str, Any]) -> dict[str, Any]:
         "title": "CourtListener Validate Citations",
         "readOnlyHint": True,
         "openWorldHint": True,
+        "defer_loading": False,
     },
     app=AppConfig(resource_uri=CITATION_VIEW_URI),
 )
@@ -480,6 +481,7 @@ async def validate_citations(
         "title": "CourtListener Lookup Citation",
         "readOnlyHint": True,
         "openWorldHint": True,
+        "defer_loading": True,
     },
 )
 @_handle_client_errors
@@ -534,6 +536,7 @@ async def lookup_citation(
         "title": "CourtListener Search Cases",
         "readOnlyHint": True,
         "openWorldHint": True,
+        "defer_loading": True,
     },
 )
 @_handle_client_errors
@@ -638,6 +641,7 @@ async def search_cases(
         "title": "CourtListener Get Case Cluster",
         "readOnlyHint": True,
         "openWorldHint": True,
+        "defer_loading": True,
     },
 )
 @_handle_client_errors
@@ -735,6 +739,7 @@ async def get_cluster(
         "title": "CourtListener Search Clusters",
         "readOnlyHint": True,
         "openWorldHint": True,
+        "defer_loading": True,
     },
 )
 @_handle_client_errors
@@ -976,6 +981,7 @@ def _extract_citations_sync(text: str) -> dict:
         "title": "CourtListener Extract Citations",
         "readOnlyHint": True,
         "openWorldHint": False,
+        "defer_loading": True,
     },
 )
 async def extract_citations(
@@ -1025,6 +1031,7 @@ async def extract_citations(
         "title": "CourtListener Citations Get Guidance",
         "readOnlyHint": True,
         "openWorldHint": False,
+        "defer_loading": False,
     },
 )
 async def get_guidance(
