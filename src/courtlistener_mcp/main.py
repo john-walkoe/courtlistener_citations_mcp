@@ -1095,6 +1095,43 @@ if _cors_extra_origin:
     _cors_origins.append(_cors_extra_origin)
 
 
+class _APIKeyAuthMiddleware:
+    """Validate x-api-key header on all non-health HTTP requests.
+
+    Auth is opt-in: if INTERNAL_AUTH_SECRET is not set (via secure storage or
+    env var), all requests are allowed through.  Set the secret to enforce
+    authentication.  Health endpoint is always open for load balancer probes.
+
+    The shared secret (INTERNAL_AUTH_SECRET) is injected at the NPM proxy
+    layer so claude.ai connectors (which have no custom-header UI) can reach
+    the endpoint without client-side configuration.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        from starlette.requests import Request
+        request = Request(scope, receive)
+        if request.url.path == "/health":
+            await self.app(scope, receive, send)
+            return
+
+        key = request.headers.get("x-api-key")
+        import secrets as _secrets
+        expected = os.environ.get("INTERNAL_AUTH_SECRET")
+        if expected and not _secrets.compare_digest(key or "", expected):
+            response = _JSONResponse({"error": "Unauthorized"}, status_code=401)
+            await response(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
+
+
 class _StreamableHTTPProbeMiddleware:
     """Return 401 for MCP probe requests that lack the required Accept header.
 
@@ -1131,12 +1168,14 @@ class _StreamableHTTPProbeMiddleware:
 
 
 app = _StreamableHTTPProbeMiddleware(
-    CORSMiddleware(
-        InboundRateLimitMiddleware(mcp.http_app(path="/mcp"), max_requests=60, window_seconds=60),
-        allow_origins=_cors_origins,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=["Mcp-Session-Id"],
+    _APIKeyAuthMiddleware(
+        CORSMiddleware(
+            InboundRateLimitMiddleware(mcp.http_app(path="/mcp"), max_requests=60, window_seconds=60),
+            allow_origins=_cors_origins,
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["*"],
+            expose_headers=["Mcp-Session-Id"],
+        )
     )
 )
 
@@ -1148,6 +1187,15 @@ app = _StreamableHTTPProbeMiddleware(
 def run_server():
     """CLI entry point. Transport controlled by TRANSPORT env var."""
     settings = _get_settings()
+
+    try:
+        import eyecite  # noqa: F401
+    except ImportError:
+        logger.warning(
+            "eyecite not installed — courtlistener_extract_citations will be unavailable. "
+            "Run: uv add eyecite"
+        )
+
     transport = settings.transport.lower()
 
     if transport == "http":

@@ -280,6 +280,7 @@ class CourtListenerClient:
             )
 
         last_error: Optional[Exception] = None
+        last_response: Optional[httpx.Response] = None
 
         for attempt in range(DEFAULT_MAX_RETRIES):
             try:
@@ -296,6 +297,7 @@ class CourtListenerClient:
                 response = await client.request(method, path, **kwargs)
 
                 if response.status_code in RETRYABLE_STATUS_CODES:
+                    last_response = response
                     delay = DEFAULT_RETRY_DELAY_SECONDS * (
                         RETRY_BACKOFF_FACTOR ** attempt
                     )
@@ -352,10 +354,16 @@ class CourtListenerClient:
                         DEFAULT_RETRY_DELAY_SECONDS * (RETRY_BACKOFF_FACTOR ** attempt)
                     )
 
+        await self._circuit_breaker.record_failure()
         if last_error:
-            await self._circuit_breaker.record_failure()
             raise last_error
-        raise RuntimeError(f"All {DEFAULT_MAX_RETRIES} retries exhausted for {path}")
+        # All retries consumed on retryable HTTP status codes — raise the last response
+        raise httpx.HTTPStatusError(
+            f"All {DEFAULT_MAX_RETRIES} retries exhausted for {path} "
+            f"(last status: {last_response.status_code if last_response else 'unknown'})",
+            request=client.build_request(method, path),
+            response=last_response or httpx.Response(503),
+        )
 
     # =========================================================================
     # CITATION TOOLS
